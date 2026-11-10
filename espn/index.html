@@ -364,6 +364,8 @@ function buildLeague(raw) {
       const t = rosterAt[yi].get(pid);
       if (t) ensure(t, yi, null);
       else if (cur) close(yi, null, { k: 'U' });
+      // redraft: rosters reset every year, so a stint ends with its season (the current one stays open)
+      if (raw.redraft && cur && yi < nSeasons - 1) close(yi, null, { k: 'S' });
     }
     return S;
   }
@@ -670,9 +672,13 @@ function analyze(raw, L) {
   const tenure = s => { const end = s.ey == null ? last : s.ey; return end - s.sy + 1; };
   const longest = [...allStints].sort((a, b) => b.wks - a.wks || tenure(b) - tenure(a)).slice(0, 25);
   const legends = []; for (let f = 1; f <= F; f++) { const tot = {}; allStints.filter(s => s.fid === f).forEach(s => tot[s.pid] = (tot[s.pid] || 0) + s.pts); const top = Object.entries(tot).sort((a, b) => b[1] - a[1]).slice(0, 5).map(([p, v]) => ({ pid: p, pts: r1(v) })); legends.push({ f, top }); }
+  const KD = p => ['K', 'PK', 'DEF', 'Def', 'DST'].includes((raw.pl[p] || [])[1]); // kickers and defenses get streamed, so they swamp loyalty lists in a redraft
   const boomerangs = [];
-  allP.forEach(p => { const st = stints(p); const seen = {}; st.forEach((s, i) => { if (seen[s.fid] != null) { boomerangs.push({ pid: p, f: s.fid, firstStint: st[seen[s.fid]], back: s, away: st.slice(seen[s.fid] + 1, i).map(x => x.fid) }); } seen[s.fid] = i; }); });
+  allP.forEach(p => { const st = stints(p); const seen = {}; st.forEach((s, i) => { if (seen[s.fid] != null && (!raw.redraft || (st[seen[s.fid]].sy === s.sy && !KD(p)))) { boomerangs.push({ pid: p, f: s.fid, firstStint: st[seen[s.fid]], back: s, away: st.slice(seen[s.fid] + 1, i).map(x => x.fid) }); } seen[s.fid] = i; }); });
   boomerangs.sort((a, b) => b.back.pts - a.back.pts);
+  // repeat picks: the same player on the same franchise in the most different seasons (redraft leagues draft fresh every year)
+  const repeat = []; allP.forEach(p => { if (KD(p)) return; const by = {}; stints(p).forEach(s => { (by[s.fid] = by[s.fid] || new Set()).add(s.sy); }); Object.entries(by).forEach(([f, ys]) => { if (ys.size >= 2) repeat.push({ pid: p, f: +f, n: ys.size, ys: [...ys].sort((a, b) => a - b) }); }); });
+  repeat.sort((a, b) => b.n - a.n || b.ys[b.ys.length - 1] - a.ys[a.ys.length - 1]);
 
   // ---- roster turnover: share of end-of-season roster kept into next season's end
   const turnover = []; for (let f = 1; f <= F; f++) { const row = []; for (let yi = 1; yi < nS; yi++) { const prev = new Set((raw.ro[years[yi - 1]][f - 1] || '').split(',').filter(Boolean)); const cur = (raw.ro[years[yi]][f - 1] || '').split(',').filter(Boolean); const kept = cur.filter(p => prev.has(p)).length; row.push(prev.size ? kept / prev.size : 0); } turnover.push({ f, kept: row }); }
@@ -708,10 +714,10 @@ function analyze(raw, L) {
       const [rd, pk] = rp.split('.').map(Number); const yi = years.indexOf(+y); if (yi < 0) return;
       const pid = a[2], f = +a[4], day = +a[0];
       const so = slotOf[y + '|' + pid] || { overall: (rd - 1) * 12 + pk };
-      const sts = stints(pid).filter(st => st.sd >= day - 3);
+      const sts = stints(pid).filter(st => st.sd >= day - 3 && (!raw.redraft || st.sy === yi));
       const raw0 = sts.reduce((t, st) => t + st.pts, 0), tot = sts.reduce((t, st) => t + st.vor, 0), starts = sts.reduce((t, st) => t + st.starts, 0);
       const mine = sts.filter(st => st.fid === f).reduce((t, st) => t + st.vor, 0);
-      const el = (last - yi) + fracCur; // seasons the player has had to produce
+      const el = raw.redraft ? (yi === last ? fracCur : 1) : (last - yi) + fracCur; // seasons the player has had to produce (one, in a redraft)
       const p0 = raw.pl[pid] || ['?', '?'];
       picks.push({ y: +y, yi, rd, pk, overall: so.overall, f, owner: ownerOf(f, yi), pid, pos: p0[1], tot: r1(tot), raw: r1(raw0), mine: r1(mine), starts, el, rate: el > 0 ? tot / el : 0, onTeam: sts.some(st => st.fid === f && st.ey == null), team: (sts.find(st => st.ey == null) || {}).fid || null });
     });
@@ -721,8 +727,11 @@ function analyze(raw, L) {
     const exp = [];
     for (let o = 1; o <= maxO; o++) { const w = Math.max(2, Math.round(o * 0.3)); const near = base.filter(p => Math.abs(p.overall - o) <= w); exp[o] = near.length ? near.reduce((t, p) => t + p.rate, 0) / near.length : 0; }
     for (let o = 2; o <= maxO; o++) exp[o] = Math.min(exp[o], exp[o - 1]);
-    const HITS = 16; // a season's worth of starts anywhere in the league
-    picks.forEach(p => { p.exp = r1((exp[Math.min(p.overall, maxO)] || 0) * p.el); p.voe = r1(p.tot - p.exp); p.hit = p.starts >= HITS; p.mature = p.el >= 2; });
+    const HITS = raw.redraft ? 8 : 16; // a season's worth of starts anywhere in the league (half of one season in a redraft)
+    picks.forEach(p => { p.exp = (exp[Math.min(p.overall, maxO)] || 0) * p.el; });
+    // redraft, season in progress: scale this year's expectations to what the whole class has produced so far, so each pick is judged against its own draft at the same point in the season
+    if (raw.redraft) { const cur = picks.filter(p => p.yi === last && p.el < 1); const e = cur.reduce((t, p) => t + p.exp, 0), a = cur.reduce((t, p) => t + p.tot, 0); if (e > 0 && a > 0) cur.forEach(p => p.exp *= a / e); }
+    picks.forEach(p => { p.exp = r1(p.exp); p.voe = r1(p.tot - p.exp); p.hit = p.starts >= HITS; p.mature = p.el >= (raw.redraft ? 1 : 2); });
     const by = (arr, k) => { const m = {}; arr.forEach(x => (m[x[k]] = m[x[k]] || []).push(x)); return m; };
     const owners = Object.entries(by(picks, 'owner')).map(([o, ps]) => {
       const mat = ps.filter(p => p.mature); const tot = ps.reduce((t, p) => t + p.tot, 0), mine = ps.reduce((t, p) => t + p.mine, 0);
@@ -750,11 +759,11 @@ function analyze(raw, L) {
       busts: [...mat.filter(p => p.overall <= 12)].sort((a, b) => a.voe - b.voe).slice(0, 10),
       gotAway: [...picks].map(p => ({ ...p, other: r1(p.tot - p.mine) })).filter(p => p.other > 0).sort((a, b) => b.other - a.other).slice(0, 10),
       gems: [...picks.filter(p => p.rd >= 3)].sort((a, b) => b.tot - a.tot).slice(0, 10),
-      rookies: classYears.slice(-2).map(y => ({ y, top: picks.filter(p => p.y === y).sort((a, b) => b.tot - a.tot).slice(0, 8) })),
+      rookies: classYears.slice(raw.redraft ? -1 : -2).map(y => ({ y, top: picks.filter(p => p.y === y).sort((a, b) => b.tot - a.tot).slice(0, 8) })),
     };
   })();
 
-  return { PPW, ppwY, toW, poPickups, titleBuilds, draftReport, pickCurve, slotValue, roundValue, years, nS, last, stints, allP, allStints, games, playoff, champions, standings, franchises, h2h, trades, partner, journeys, nextTradeOf, faab, bigBids, bestPickups, bidTrend, hitRate, HIT, longest, legends, boomerangs, turnover, records, bid, tenure };
+  return { PPW, ppwY, toW, poPickups, titleBuilds, draftReport, pickCurve, slotValue, roundValue, years, nS, last, stints, allP, allStints, games, playoff, champions, standings, franchises, h2h, trades, partner, journeys, nextTradeOf, faab, bigBids, bestPickups, bidTrend, hitRate, HIT, longest, legends, boomerangs, repeat, turnover, records, bid, tenure };
 }
 
 // teams in the current season only (leagues that lost owners keep placeholder 'Team N' rows for them)
@@ -1124,7 +1133,7 @@ const FS = (f, yi = last, d) => `<span class="fdot" style="--fcol:${fcol(f)}"></
 const POSL = ['QB', 'RB', 'WR', 'TE', 'DL', 'LB', 'DB'];
 const lineupText = y => { const r = raw.repl && raw.repl[y]; if (!r) return ''; const c = {}; r.slots.forEach(k => c[k] = (c[k] || 0) + 1); const nm = k => ({ 'RB/WR/TE': 'flex', 'QB/RB/WR/TE': 'superflex', 'RB/WR': 'RB/WR flex', 'WR/TE': 'WR/TE flex', 'DL/LB/DB': 'IDP flex', 'QB/RB/WR/TE/DL/LB/DB': 'any' }[k] || k); return Object.entries(c).map(([k, n]) => `${n} ${nm(k)}`).join(', '); };
 const valueHow = () => { const ys = years.filter(y => raw.repl && raw.repl[y]); if (!ys.length) return ''; const cols = POSL.filter(p => ys.some(y => raw.repl[y].r[p] != null)); const ly = ys[ys.length - 1];
-  return `<details class="lk-how" style="margin-top:8px"><summary>How value over replacement works</summary><div class="sub" style="font-size:14px;max-width:68ch"><p>A started week only counts for what it added over the player a team could have started instead. Each season, every team's lineup is filled with the league's best scorers using that season's lineup rules (${esc(lineupText(ly))} in ${ly}). The first player left out at each position sets that position's replacement level, and every start is scored as points minus that level, never below zero for an asset as a whole.</p><p>That is why a starting QB counts for less here than his raw points suggest: with one QB slot per team, the 13th-best QB is still a decent starter. Deeper positions and the flex spots push replacement lower for running backs and receivers, and IDP spots are scored against their own replacement. Raw started points still show in small type beside each value.</p><p>Wins added turns that value into wins. In this league one more point a week moves a team's odds of winning that week by a predictable amount, set by how spread out weekly scores are, so about <b>${n0(A.PPW)} points of value equal one win</b>. A trade that gave a team 250 points of value over replacement added close to ${n1(250 / A.PPW)} wins across the time those players were on the team.</p></div>
+  return `<details class="lk-how" style="margin-top:8px"><summary>How value over replacement works</summary><div class="sub" style="font-size:14px;max-width:68ch"><p>A started week only counts for what it added over the player a team could have started instead. Each season, every team's lineup is filled with the league's best scorers using that season's lineup rules (${esc(lineupText(ly))} in ${ly}). The first player left out at each position sets that position's replacement level, and every start is scored as points minus that level, never below zero for an asset as a whole.</p><p>That is why a starting QB counts for less here than his raw points suggest: with one QB slot per team, the ${NF + 1}th-best QB is still a decent starter. Deeper positions and the flex spots push replacement lower for running backs and receivers, and IDP spots are scored against their own replacement. Raw started points still show in small type beside each value.</p><p>Wins added turns that value into wins. In this league one more point a week moves a team's odds of winning that week by a predictable amount, set by how spread out weekly scores are, so about <b>${n0(A.PPW)} points of value equal one win</b>. A trade that gave a team 250 points of value over replacement added close to ${n1(250 / A.PPW)} wins across the time those players were on the team.</p></div>
     <div class="tbl" style="margin-top:8px"><table><thead><tr><th>Season</th>${cols.map(p => `<th class="num">${p}</th>`).join('')}</tr></thead><tbody>${[...ys].reverse().map(y => `<tr><td>${y}</td>${cols.map(p => `<td class="num">${raw.repl[y].r[p] != null ? n1(raw.repl[y].r[p]) : '–'}</td>`).join('')}</tr>`).join('')}</tbody></table></div><p class="sub" style="margin-top:6px">Replacement level in points per game for each season.</p></details>`; };
 const ownerOpts = sel => `<option value="">All owners</option>` + Array.from({ length: NF }, (_, i) => i + 1).map(f => `<option value="${f}"${+sel === f ? ' selected' : ''}>${esc(owner(f))} (${esc(curTeam(f))})</option>`).join('');
 const yearOpts = sel => `<option value="">All seasons</option>` + years.map((y, yi) => `<option value="${yi}"${sel !== '' && +sel === yi ? ' selected' : ''}>${y}</option>`).join('');
@@ -1284,7 +1293,7 @@ function viewOverview() {
     <div class="fact"><div class="eyebrow">Most frequent trade partners</div><div class="big">${pc}</div><div class="sub">${FSH(pa)} and ${FSH(pb)}</div></div>
     <div class="fact"><div class="eyebrow">Never traded with each other</div><div class="big">${allPairs.length}</div><div class="sub">${allPairs.length ? allPairs.slice(0, 3).map(([a, b]) => `${esc(shortH(a))} & ${esc(shortH(b))}`).join(', ') + (allPairs.length > 3 ? ', and more' : '') : 'Every pair has made a deal'}</div></div>
     ${bb ? `<div class="fact"><div class="eyebrow">Biggest FAAB bid</div><div class="big">${money(A.bid(bb))}</div><div class="sub">${P(bb.pid)} to ${FS(bb.fid, bb.sy)}, ${yr(bb.sy)}</div></div>` : ""}
-    <div class="fact"><div class="eyebrow">Most traveled player</div><div class="big">${tv[1]}</div><div class="sub">${P(tv[0].id)} has played for ${tv[1]} of ${NFR} franchises</div></div>
+    ${raw.redraft && A.repeat[0] ? `<div class="fact"><div class="eyebrow">Old reliable</div><div class="big">${A.repeat[0].n}</div><div class="sub">${P(A.repeat[0].pid)} has been on ${FS(A.repeat[0].f, A.repeat[0].ys[A.repeat[0].ys.length - 1])}'s roster in ${A.repeat[0].n} different seasons</div></div>` : `<div class="fact"><div class="eyebrow">Most traveled player</div><div class="big">${tv[1]}</div><div class="sub">${P(tv[0].id)} has played for ${tv[1]} of ${NFR} franchises</div></div>`}
     <div class="fact"><div class="eyebrow">Most lopsided trade</div><div class="big">${n0(heist.diff)}</div><div class="sub">Points of separation. <button class="tlink" data-t="${heist.i}">${esc(short(heist.winner, heist.yi, heist.d))} won it in ${yr(heist.yi)}</button></div></div>
   </div>
   <section class="card"><div class="pad"><h3>All-time standings</h3><p class="sub">Regular season record and points per season. Playoff record counts championship bracket games only. Lineup efficiency is points scored divided by the best possible lineup each week.</p></div>
@@ -1301,7 +1310,7 @@ function howIn(s, pid) {
     case 'A': return `<div class="how">Free agent pickup</div>${when}`;
     case 'T': return `<div class="how">Traded from ${esc(team(h.from, s.sy)[0])}</div>${when}${dealBox(h.tr, pid)}`;
     case 'O': return `<div class="how">On the ${years[0]} roster</div><div class="when">Before the league's records start</div>`;
-    default: return `<div class="how">Joined in ${yr(s.sy)}</div><div class="when">Move not recorded in MFL</div>`;
+    default: return `<div class="how">Joined in ${yr(s.sy)}</div><div class="when">Move not in the league's records</div>`;
   }
 }
 function howOut(s, pid) {
@@ -1310,7 +1319,8 @@ function howOut(s, pid) {
   switch (e.k) {
     case 'T': return `<div class="how">Traded to ${esc(team(e.to, s.ey)[0])}</div>${when}${dealBox(e.tr, pid)}`;
     case 'X': return `<div class="how">Released</div>${when}`;
-    default: return `<div class="how">Left the roster in ${yr(s.ey)}</div><div class="when">Move not recorded in MFL</div>`;
+    case 'S': return `<div class="how">Season ended</div><div class="when">On the roster through ${yr(s.ey)}</div>`;
+    default: return `<div class="how">Left the roster in ${yr(s.ey)}</div><div class="when">Move not in the league's records</div>`;
   }
 }
 function viewPlayer(pid) {
@@ -1340,8 +1350,8 @@ function viewPlayers(pid) {
   pid = pid || travel[0][0].id;
   const lifers = [...A.longest].slice(0, 12);
   main.innerHTML = `<div class="split"><div>${viewPlayer(pid)}</div><aside class="grid3" style="grid-template-columns:1fr">
-    <section class="card pad"><h3>Most traveled</h3><p class="sub">Rostered by the most franchises.</p><ol class="list">${travel.slice(0, 12).map(([x, f, n], i) => `<li><span><span class="rk">${i + 1}</span>${P(x.id)} <span class="owner">${esc(x.pos)}</span></span><span class="v">${f}</span></li>`).join('')}</ol></section>
-    <section class="card pad"><h3>Franchise lifers</h3><p class="sub">Longest single stints, by weeks on the roster.</p><ol class="list">${lifers.map((s, i) => `<li><span><span class="rk">${i + 1}</span>${P(s.pid)}<br><span class="owner">${esc(short(s.fid, s.sy))} · ${yr(s.sy)}–${s.ey == null ? 'now' : yr(s.ey)}</span></span><span class="v">${s.wks}</span></li>`).join('')}</ol></section>
+    <section class="card pad"><h3>Most traveled</h3><p class="sub">Rostered by the most franchises${raw.redraft ? ' over the years, kickers and defenses left out' : ''}.</p><ol class="list">${travel.filter(([x]) => !raw.redraft || !['K', 'DEF', 'PK', 'Def'].includes(x.pos)).slice(0, 12).map(([x, f, n], i) => `<li><span><span class="rk">${i + 1}</span>${P(x.id)} <span class="owner">${esc(x.pos)}</span></span><span class="v">${f}</span></li>`).join('')}</ol></section>
+    ${raw.redraft ? `<section class="card pad"><h3>Old reliables</h3><p class="sub">Players one team keeps coming back to: the most seasons on the same roster.</p><ol class="list">${A.repeat.slice(0, 12).map((x, i) => `<li><span><span class="rk">${i + 1}</span>${P(x.pid)}<br><span class="owner">${esc(short(x.f, x.ys[x.ys.length - 1]))} · ${x.ys.map(k => years[k]).join(', ')}</span></span><span class="v">${x.n}</span></li>`).join('')}</ol></section>` : `<section class="card pad"><h3>Franchise lifers</h3><p class="sub">Longest single stints, by weeks on the roster.</p><ol class="list">${lifers.map((s, i) => `<li><span><span class="rk">${i + 1}</span>${P(s.pid)}<br><span class="owner">${esc(short(s.fid, s.sy))} · ${yr(s.sy)}–${s.ey == null ? 'now' : yr(s.ey)}</span></span><span class="v">${s.wks}</span></li>`).join('')}</ol></section>`}
   </aside></div>`;
   if (matchMedia('(max-width:560px)').matches) document.querySelectorAll('#main tbody tr').forEach((tr, i) => { const b = tr.querySelector('.mob'); if (!b) return; b.hidden = false; const st0 = S(pid)[i]; b.innerHTML = `<div class="eyebrow">Arrived</div>${howIn(st0, pid)}`; const o = tr.querySelector('.out'); if (o && !o.querySelector('.eyebrow')) o.insertAdjacentHTML('afterbegin', `<div class="eyebrow">${st0.ey == null ? 'Now' : 'Left'}</div>`); });
 }
@@ -1383,6 +1393,7 @@ function treeHTML(i, depth, seen) {
     if (!s.end) line = `still on ${esc(short(f))}'s roster`;
     else if (s.end.k === 'X') line = `released by ${esc(short(f))} ${fmt(s.ed)}`;
     else if (s.end.k === 'T') line = `flipped by ${esc(short(f))} to ${esc(short(s.end.to))} <button class="tlink" data-t="${s.end.tr}">${fmt(s.ed)}</button>`;
+    else if (s.end.k === 'S') line = `kept through the end of ${yr(s.ey)}`;
     else line = `left ${esc(short(f))}'s roster in ${yr(s.ey)}`;
     let sub = '';
     if (s.end && s.end.k === 'T' && depth < 3 && !seen.has(s.end.tr)) {
@@ -1449,7 +1460,7 @@ function tradeRoom() {
   const tb = [...(A.titleBuilds || [])].reverse().map(b => { const got = b.starters.filter(x => ['T', 'W', 'A'].includes(x.how.k)); const home = b.starters.length - got.length;
     return `<li style="display:block"><div><span class="rk" style="width:auto;margin-right:6px">${b.y}</span>${FS(b.f, b.yi)} <span class="owner">won it${b.final ? `, ${n1(Math.max(b.final[2], b.final[4]))} to ${n1(Math.min(b.final[2], b.final[4]))}` : ''}</span></div>
       <div class="owner" style="margin-top:4px">${got.length ? got.map(x => `${P(x.pid)} <b style="color:var(--ink)">${n1(x.fp)}</b> in the final, ${howGot(x)}`).join('<br>') : 'Every starter in the final was drafted or already on the roster.'}${got.length && home ? `<br>Plus ${home} drafted or longtime starters.` : ''}</div></li>`; }).join('');
-  const poS = (poT.length || tb) ? `<section class="card pad" id="tr-playoffs"><h3>Playoff difference-makers</h3><p class="sub">Moves judged by the first championship bracket after they happened: started points in playoff games for the team that made the move. A deadline deal counts that December, and an offseason deal counts the next one. A title tag means he started in the championship game and his team won it.</p>
+  const poS = (poT.length || tb) ? `<section class="card pad" id="tr-playoffs"><h3>Playoff difference-makers</h3><p class="sub">Moves judged by the first championship bracket after they happened: started points in playoff games for the team that made the move. ${raw.redraft ? 'Rosters reset every year, so only that same December counts.' : 'A deadline deal counts that December, and an offseason deal counts the next one.'} A title tag means he started in the championship game and his team won it.</p>
     <div class="grid2" style="margin-top:8px"><div><h3 style="font-size:16px">Trades</h3><ol class="list">${poL}</ol></div><div><h3 style="font-size:16px">Waiver and free-agent pickups</h3><ol class="list">${poP}</ol></div></div>
     ${tb ? `<p class="sub" style="margin-top:14px">How every title-game lineup was put together now lives on its own page: <a href="#titles">League, then Titles</a>.</p>` : ''}</section>` : '';
   // marks and nemeses
@@ -1527,7 +1538,7 @@ function viewTrades(focus) {
   if (focus != null) { const ix = list.findIndex(t => t.i === focus); if (ix >= tstate.n) tstate.n = ix + 1; }
   const shown = list.slice(0, tstate.n);
   const pairLabel = tstate.pair ? (() => { const [a, b] = tstate.pair.split('-').map(Number); return `<span class="tag cur">${esc(shortH(a))} × ${esc(shortH(b))}</span> <button class="btn" id="clrpair">Clear pair</button>`; })() : '';
-  main.innerHTML = (focus == null ? tradeRoom() : '') + `<section id="tr-log"><h2 class="sec">Trade log</h2><p class="lede">Every completed trade since ${years[0]}, graded by the value each side got out of it: points over a replacement starter, using this league's lineup rules. An asterisk means the value is still growing.</p><details class="lk-how" style="margin-top:8px"><summary>How trades are graded</summary><p class="sub" style="font-size:14px;max-width:68ch">Players count the value they added as starters for the team that traded for them. A pick the team used counts what the player it drafted scored for them. A pick the team traded away again counts its draft slot's value: what a player taken at that slot has typically given the team that drafted him in this league, from a 1.01 down to the last pick. Undrafted or unmatched picks count their round's average. Each pick shows the path it took to the player it became. <a href="#picks">How pick values work</a>.</p></details>${valueHow()}</p></section>
+  main.innerHTML = (focus == null ? tradeRoom() : '') + `<section id="tr-log"><h2 class="sec">Trade log</h2><p class="lede">Every completed trade since ${years[0]}, graded by the value each side got out of it: points over a replacement starter, using this league's lineup rules. ${raw.redraft ? 'Rosters reset every year, so a trade only counts the rest of the season it was made in. An asterisk means that season is still going.' : 'An asterisk means the value is still growing.'}</p><details class="lk-how" style="margin-top:8px"><summary>How trades are graded</summary><p class="sub" style="font-size:14px;max-width:68ch">${raw.redraft ? 'Players count the value they added as starters for the team that traded for them, from the trade to the end of that season. There are no draft picks to trade in this league.' : `Players count the value they added as starters for the team that traded for them. A pick the team used counts what the player it drafted scored for them. A pick the team traded away again counts its draft slot's value: what a player taken at that slot has typically given the team that drafted him in this league, from a 1.01 down to the last pick. Undrafted or unmatched picks count their round's average. Each pick shows the path it took to the player it became. <a href="#picks">How pick values work</a>.`}</p></details>${valueHow()}</p></section>
   <div class="grid2 tr-side">
     <section class="card pad"><h3>Who trades with whom</h3><p class="sub">Number of trades between each pair of franchises, labeled by current owner. Tap a square to see those trades.</p><div class="tbl" style="margin-top:10px">${mx}</div></section>
     <section class="card pad"><h3>Trade volume by season</h3><div class="bars" style="margin-top:10px">${years.map((y, yi) => { const c = A.trades.filter(t => t.yi === yi).length; const m = Math.max(...years.map((_, k) => A.trades.filter(t => t.yi === k).length)); return `<div class="bar"><span>${y}</span><span class="t"><i style="width:${c / m * 100}%"></i></span><span class="num">${c}</span></div>`; }).join('')}</div>
@@ -1572,7 +1583,7 @@ function draftReportHTML() {
   const O = [...R.owners].sort((a, b) => drs.sort === 'pp' ? b.perPick - a.perPick : drs.sort === 'hit' ? (b.matN ? b.hits / b.matN : -1) - (a.matN ? a.hits / a.matN : -1) : drs.sort === 'keep' ? (b.keep ?? -1) - (a.keep ?? -1) : b.voe - a.voe);
   const maxV = Math.max(1, ...R.owners.map(o => Math.abs(o.voe)));
   const vbar = v => { const w = Math.abs(v) / maxV * 50; return `<span class="dr-track"><i class="dr-mid"></i><i class="dr-bar" style="${v >= 0 ? 'left:50%' : `left:${50 - w}%`};width:${w}%;background:${v >= 0 ? 'var(--win)' : 'var(--loss)'}"></i></span>`; };
-  const report = `<section class="card" id="dr-card"><div class="pad"><h3>Report card</h3><p class="sub">Every rookie pick each owner made, graded against what that draft slot usually produces here. Value over slot adds up the difference; the best drafters land players who outscore where they were taken.</p>
+  const report = `<section class="card" id="dr-card"><div class="pad"><h3>Report card</h3><p class="sub">Every ${raw.redraft ? '' : 'rookie '}pick each owner made, graded against what that draft slot usually produces here${raw.redraft ? ' in a season' : ''}. Value over slot adds up the difference; the best drafters land players who outscore where they were taken.</p>
     <div class="controls" style="margin-top:8px"><label for="drsort">Sort by<select id="drsort">${[['voe', 'Value over slot'], ['pp', 'Per pick'], ['hit', 'Hit rate'], ['keep', 'Kept for himself']].map(([k, t]) => `<option value="${k}"${drs.sort === k ? ' selected' : ''}>${t}</option>`).join('')}</select></label></div></div>
     <div class="tbl"><table><thead><tr><th class="num">#</th><th>Owner</th><th class="num">Picks</th><th>Value over slot</th><th class="num hm">Per pick</th><th class="num">Hit rate</th><th class="num hm">Kept</th><th class="hm">Best pick</th></tr></thead><tbody>${O.map((o, i) => `<tr><td class="num"><b>${i + 1}</b></td><td>${FN(o.f, o.yi)}<div class="owner">${o.classes} ${o.classes === 1 ? 'draft' : 'drafts'}</div></td><td class="num">${o.n}</td><td style="min-width:150px">${vbar(o.voe)} <b style="color:${col(o.voe)}">${sg(o.voe)}</b></td><td class="num hm" style="color:${col(o.perPick)}">${sg(o.perPick)}</td><td class="num">${o.matN ? `${Math.round(o.hits / o.matN * 100)}% <span class="owner">${o.hits}/${o.matN}</span>` : '<span class="owner">too early</span>'}</td><td class="num hm">${o.keep == null ? '–' : Math.round(o.keep * 100) + '%'}</td><td class="hm">${o.best ? `${P(o.best.pid)} <span class="owner">${pk(o.best)}, ${sg(o.best.voe)}</span>` : ''}</td></tr>`).join('')}</tbody></table></div></section>`;
   // owners x classes heat grid
@@ -1588,32 +1599,34 @@ function draftReportHTML() {
         <div><div class="eyebrow">Best player</div>${P(c.best.pid)} ${pos(c.best)} <span class="owner">${pk(c.best)} by ${esc(c.best.owner)}, ${n0(c.best.tot)} pts</span></div>
         ${!young ? `<div><div class="eyebrow">Biggest steal</div>${P(c.steal.pid)} ${pos(c.steal)} <span class="owner">${pk(c.steal)} by ${esc(c.steal.owner)}, ${sg(c.steal.voe)} over slot</span></div>
         <div><div class="eyebrow">Won the draft</div><b>${esc(c.winner.owner)}</b> <span class="owner">${sg(c.winner.voe)} over slot on ${c.winner.n} picks</span></div>
-        <div><div class="eyebrow">Lost the draft</div>${esc(c.loser.owner)} <span class="owner">${sg(c.loser.voe)} on ${c.loser.n} picks</span></div>` : `<div class="sub">Too early to grade. These rookies have played ${Math.round(c.el * 100)}% of a regular season.</div>`}</section>`; }).join('')}</div>`;
+        <div><div class="eyebrow">Lost the draft</div>${esc(c.loser.owner)} <span class="owner">${sg(c.loser.voe)} on ${c.loser.n} picks</span></div>` : `<div class="sub">Too early to grade. ${raw.redraft ? 'This draft is' : 'These rookies have played'} ${Math.round(c.el * 100)}% ${raw.redraft ? 'of the way through its regular season' : 'of a regular season'}.</div>`}</section>`; }).join('')}</div>`;
   const li = (p, right, sub) => `<li><span>${P(p.pid)} ${pos(p)} <span class="owner">${sub(p)}</span></span><span class="v">${right(p)}</span></li>`;
   const lists = `<section id="dr-hits"><h2 class="sec" style="font-size:24px">Hits and misses</h2><p class="lede">The picks that made and broke drafts${first ? ` since ${first}` : ''}.</p></section>
     <div class="grid2">
       <section class="card pad"><h3>Biggest steals</h3><p class="sub">Most points over what the slot usually returns.</p><ol class="list">${R.steals.map(p => li(p, p => `<b style="color:var(--win)">${sg(p.voe)}</b>`, p => `${pk(p)} · ${esc(p.owner)}`)).join('')}</ol></section>
-      <section class="card pad"><h3>Biggest busts</h3><p class="sub">Top-12 picks with two or more seasons behind them that fell furthest short.</p><ol class="list">${R.busts.map(p => li(p, p => `<b style="color:var(--loss)">${sg(p.voe)}</b>`, p => `${pk(p)} · ${esc(p.owner)}`)).join('')}</ol></section>
-      <section class="card pad"><h3>The ones that got away</h3><p class="sub">Drafted players who did most of their scoring for somebody else.</p><ol class="list">${R.gotAway.map(p => li(p, p => n0(p.other), p => `${pk(p)} · drafted by ${esc(p.owner)}${p.team && p.team !== p.f ? `, now ${esc(short(p.team))}` : ''}`)).join('')}</ol></section>
+      <section class="card pad"><h3>Biggest busts</h3><p class="sub">Top-12 picks ${raw.redraft ? 'from finished seasons' : 'with two or more seasons behind them'} that fell furthest short.</p><ol class="list">${R.busts.map(p => li(p, p => `<b style="color:var(--loss)">${sg(p.voe)}</b>`, p => `${pk(p)} · ${esc(p.owner)}`)).join('')}</ol></section>
+      <section class="card pad"><h3>The ones that got away</h3><p class="sub">Drafted players who did most of their scoring for somebody else${raw.redraft ? ' that season' : ''}.</p><ol class="list">${R.gotAway.map(p => li(p, p => n0(p.other), p => `${pk(p)} · drafted by ${esc(p.owner)}${p.team && p.team !== p.f ? `, now ${esc(short(p.team))}` : ''}`)).join('')}</ol></section>
       <section class="card pad"><h3>Late-round gems</h3><p class="sub">Most value from picks in the 3rd round or later.</p><ol class="list">${R.gems.map(p => li(p, p => n0(p.tot), p => `${pk(p)} · ${esc(p.owner)}`)).join('')}</ol></section>
     </div>`;
-  const recent = `<section id="dr-recent"><h2 class="sec" style="font-size:24px">The newest rookies</h2><p class="lede">Early returns from the last two drafts, in value so far.</p></section>
+  const recent = `<section id="dr-recent"><h2 class="sec" style="font-size:24px">${raw.redraft ? 'This year\'s draft' : 'The newest rookies'}</h2><p class="lede">${raw.redraft ? 'The best value from this season\'s draft so far.' : 'Early returns from the last two drafts, in value so far.'}</p></section>
     <div class="grid2">${[...R.rookies].reverse().map(c => `<section class="card pad"><h3>${c.y} class</h3><ol class="list">${c.top.map((p, i) => `<li><span><span class="rk">${i + 1}</span> ${P(p.pid)} ${pos(p)} <span class="owner">${pk(p)} · ${esc(p.owner)}${p.team && p.team !== p.f ? `, now ${esc(short(p.team))}` : ''}</span></span><span class="v">${n1(p.tot)}</span></li>`).join('')}</ol></section>`).join('')}</div>`;
   // strategy
   const posCols = { QB: '#c2410c', RB: '#15803d', WR: '#1d4ed8', TE: '#a16207' };
   const posBar = o => { const tot = Object.values(o.pos).reduce((a, b) => a + b, 0) || 1; const segs = ['QB', 'RB', 'WR', 'TE'].map(k => [k, o.pos[k] || 0]); const other = tot - segs.reduce((a, [, v]) => a + v, 0);
     return `<span class="dr-pos">${segs.map(([k, v]) => v ? `<i style="width:${v / tot * 100}%;background:${posCols[k]}" title="${k} ${v}">${v / tot >= 0.12 ? k : ''}</i>` : '').join('')}${other ? `<i style="width:${other / tot * 100}%;background:var(--muted)" title="Other ${other}"></i>` : ''}</span>`; };
-  const strategy = `<section id="dr-strategy"><h2 class="sec" style="font-size:24px">Draft strategy</h2><p class="lede">What each owner reaches for, and which bets have paid off in this league. A hit is a player who has made ${R.HITS} or more starts anywhere in the league, counted only for picks with two seasons behind them.</p></section>
+  const strategy = `<section id="dr-strategy"><h2 class="sec" style="font-size:24px">Draft strategy</h2><p class="lede">What each owner reaches for, and which bets have paid off in this league. A hit is a player who has made ${R.HITS} or more starts anywhere in the league${raw.redraft ? ' in his draft season, counted only for finished seasons' : ', counted only for picks with two seasons behind them'}.</p></section>
     <div class="grid2"><section class="card pad"><h3>Who drafts what</h3><p class="sub">Share of each owner's picks by position.</p><div class="dr-legend">${Object.entries(posCols).map(([k, c]) => `<span><i style="background:${c}"></i>${k}</span>`).join('')}</div>
       <div style="display:grid;gap:8px;margin-top:8px">${ownersByFirst.filter(o => o.n >= 5).map(o => `<div class="dr-prow"><span>${FS(o.f, o.yi)}</span>${posBar(o)}</div>`).join('')}</div></section>
       <section class="card pad"><h3>Hit rate by round</h3><div class="bars" style="margin-top:8px">${R.roundHit.map(r => `<div class="bar"><span>${ord(r.r)}</span><span class="t"><i style="width:${r.hit * 100}%"></i></span><span class="num">${Math.round(r.hit * 100)}%</span></div>`).join('')}</div>
         <h3 style="margin-top:18px">Hit rate by position</h3><div class="tbl"><table><thead><tr><th>Pos</th><th class="num">Picks</th><th class="num">Overall</th><th class="num">1st round</th><th class="num">3rd+</th></tr></thead><tbody>${R.posStats.map(x => `<tr><td><b>${esc(x.pos)}</b></td><td class="num">${x.n}</td><td class="num">${Math.round(x.hit * 100)}%</td><td class="num">${x.r1 ? Math.round(x.r1.hit * 100) + '% <span class="owner">' + x.r1.n + '</span>' : '–'}</td><td class="num">${x.late ? Math.round(x.late.hit * 100) + '% <span class="owner">' + x.late.n + '</span>' : '–'}</td></tr>`).join('')}</tbody></table></div></section></div>`;
-  const how = `<section class="card pad"><details><summary><b>How the draft grades work</b></summary><div class="column" style="font-size:15px">
+  const how = `<section class="card pad"><details><summary><b>How the draft grades work</b></summary><div class="column" style="font-size:15px">${raw.redraft ? `
+    <p>Every pick${first ? ` since ${first}` : ''} is matched to the player taken there, and the value he added as a starter that season (points over a replacement player at his position) is added up for every team he played for. Rosters reset each year, so only the draft season counts. A pick gets credit for finding the player even if he was traded or dropped later, so this measures drafting, not roster management. The Kept column shows how much of that production stayed with the drafter.</p>
+    <p>Each slot has an expected return: the average value that picks around that slot have produced in a season in this league, smoothed so a later pick never expects more than an earlier one. Value over slot is the actual total minus that expectation. While a season is still going, its picks are graded against the rest of that year's draft: the expectations are scaled to what the whole class has produced so far, so the class adds up to zero until the season is done.</p>` : `
     <p>Every rookie pick${first ? ` since ${first}` : ''} is matched to the player taken there, and the value he has added as a starter (points over a replacement player at his position) is added up for every team he has played for in this league. A pick gets credit for finding the player even if he was traded away later, so this measures drafting, not roster management. The Kept column shows how much of that production stayed with the drafter.</p>
     <p>Each slot has an expected return: the average value per season that picks around that slot have produced in this league, smoothed so a later pick never expects more than an earlier one. A pick's expected total is that rate times the seasons the player has had, so a 2025 pick is only held to about a season and a half of production. Value over slot is the actual total minus the expected total. Startup drafts are left out because every veteran was on the board.</p>
-    <p>The numbers favor the older classes, which have had more time to pile up points in either direction, and the current rookies are graded on part of one season.</p></div></details>${valueHow()}</section>`;
-  const nav = `<div class="pills jump">${[['dr-card', 'Report card'], ['dr-grid', 'Every draft'], ['dr-classes', 'Classes'], ['dr-hits', 'Hits and misses'], ['dr-recent', 'Newest rookies'], ['dr-strategy', 'Strategy'], ['dr-journeys', 'Pick journeys']].map(([id, t]) => `<a class="pill" href="#${id}" data-jump="${id}">${t}</a>`).join('')}</div>`;
-  return `<section><h2 class="sec">The draft room</h2><p class="lede">Who can actually draft. ${R.picks.length} ${raw.keeper ? 'draft' : 'rookie'} picks across ${R.classYears.length} drafts, each graded on what the player did in this league against what his slot usually delivers.</p></section>${nav}
+    <p>The numbers favor the older classes, which have had more time to pile up points in either direction, and the current rookies are graded on part of one season.</p>`}</div></details>${valueHow()}</section>`;
+  const nav = `<div class="pills jump">${[['dr-card', 'Report card'], ['dr-grid', 'Every draft'], ['dr-classes', 'Classes'], ['dr-hits', 'Hits and misses'], ['dr-recent', raw.redraft ? 'This year' : 'Newest rookies'], ['dr-strategy', 'Strategy'], ...(raw.redraft ? [] : [['dr-journeys', 'Pick journeys']])].map(([id, t]) => `<a class="pill" href="#${id}" data-jump="${id}">${t}</a>`).join('')}</div>`;
+  return `<section><h2 class="sec">The draft room</h2><p class="lede">Who can actually draft. ${R.picks.length} ${raw.keeper ? 'draft' : 'rookie'} picks across ${R.classYears.length} drafts, each graded on what the player did ${raw.redraft ? 'that season' : 'in this league'} against what his slot usually delivers.</p></section>${nav}
     ${how}${report}${gridHTML}${classCards}${lists}${recent}${strategy}`;
 }
 function wireDraftReport() {
@@ -1641,6 +1654,7 @@ function viewPicks() {
   // who hoards picks: picks acquired by owner
   const acq = {}; A.journeys.forEach(j => j.hops.forEach(h => acq[h.to] = (acq[h.to] || 0) + 1));
   const sold = {}; A.journeys.forEach(j => j.hops.forEach(h => sold[h.from] = (sold[h.from] || 0) + 1));
+  if (raw.redraft) { main.innerHTML = draftReportHTML(); wireDraftReport(); return; }
   main.innerHTML = draftReportHTML() + `<section id="dr-journeys"><h2 class="sec">Draft pick journeys</h2><p class="lede">Future picks change hands a lot. Each path starts with the original owner and follows every trade until someone used the pick. Tap a hop to open that trade.</p></section>
   <div class="split"><section class="card pad">
     <div class="controls" style="margin-bottom:6px"><label for="pmin">Show picks traded at least<select id="pmin">${[1, 2, 3, 4].map(n => `<option value="${n}"${pkstate.min === n ? ' selected' : ''}>${n} ${n === 1 ? 'time' : 'times'}</option>`).join('')}</select></label>
@@ -1791,9 +1805,9 @@ function viewFranchises(f) {
   <section class="card"><div class="pad"><h3>Season by season</h3></div><div class="tbl"><table><thead><tr><th>Season</th><th class="num">Record</th><th class="num">Finish</th><th class="num">Points for</th><th class="num hm">Lineup eff.</th><th>Postseason</th></tr></thead><tbody>${seasonRows}</tbody></table></div></section>
   <div class="grid3">
     <section class="card pad"><h3>Franchise legends</h3><p class="sub">Most started points for this franchise, all stints combined.</p><ol class="list">${legends.map((x, i) => `<li><span><span class="rk">${i + 1}</span>${P(x.pid)}</span><span class="v">${n0(x.pts)}</span></li>`).join('')}</ol></section>
-    <section class="card pad"><h3>Longest-tenured now</h3><p class="sub">Current roster, by when they arrived.</p><ol class="list">${cur.map((x, i) => `<li><span><span class="rk">${i + 1}</span>${P(x.pid)}</span><span class="owner">since ${yr(x.sy)}</span></li>`).join('')}</ol></section>
+    ${raw.redraft ? `<section class="card pad"><h3>Old reliables</h3><p class="sub">Players this team has rostered in the most seasons.</p><ol class="list">${A.repeat.filter(x => x.f === f).slice(0, 8).map((x, i) => `<li><span><span class="rk">${i + 1}</span>${P(x.pid)}<br><span class="owner">${x.ys.map(k => years[k]).join(', ')}</span></span><span class="v">${x.n}</span></li>`).join('') || '<li class="owner">Nobody yet.</li>'}</ol></section>` : `<section class="card pad"><h3>Longest-tenured now</h3><p class="sub">Current roster, by when they arrived.</p><ol class="list">${cur.map((x, i) => `<li><span><span class="rk">${i + 1}</span>${P(x.pid)}</span><span class="owner">since ${yr(x.sy)}</span></li>`).join('')}</ol></section>`}
     <section class="card pad"><h3>Trade partners</h3><ol class="list">${partners.slice(0, 6).map(([k, c], i) => `<li><span><span class="rk">${i + 1}</span>${FSH(k)}</span><span class="v">${c}</span></li>`).join('')}</ol>
-      <h3 style="margin-top:16px">Roster carryover</h3><p class="sub">Share of last season's final roster still there at the end of the next.</p><div class="bars" style="margin-top:8px">${kept.map((k, i) => `<div class="bar"><span>${years[i + 1]}</span><span class="t"><i style="width:${k * 100}%;background:${fcol(f)}"></i></span><span class="num">${pct(k)}</span></div>`).join('')}</div></section>
+      ${raw.redraft ? '' : `<h3 style="margin-top:16px">Roster carryover</h3><p class="sub">Share of last season's final roster still there at the end of the next.</p><div class="bars" style="margin-top:8px">${kept.map((k, i) => `<div class="bar"><span>${years[i + 1]}</span><span class="t"><i style="width:${k * 100}%;background:${fcol(f)}"></i></span><span class="num">${pct(k)}</span></div>`).join('')}</div>`}</section>
   </div>`;
   main.querySelectorAll('[data-fsel]').forEach(b => b.onclick = () => go('f' + b.dataset.fsel));
 }
@@ -1848,7 +1862,7 @@ function viewRecords() {
     ${box('Most points in a season', 'Regular season points for.', R.seasonPF.map(x => `<li><span>${FS(x.f, x.yi)} <span class="owner">${years[x.yi]}, ${rec(x.w, x.l, x.t)}</span></span><span class="v">${n0(x.pf)}</span></li>`).join(''))}
     ${box('Best lineup setters', 'Season lineup efficiency.', R.seasonEff.map(x => `<li><span>${FS(x.f, x.yi)} <span class="owner">${years[x.yi]}</span></span><span class="v">${pct(x.eff)}</span></li>`).join(''))}
     ${box('Worst lineup setters', 'Season lineup efficiency.', R.worstEff.map(x => `<li><span>${FS(x.f, x.yi)} <span class="owner">${years[x.yi]}</span></span><span class="v">${pct(x.eff)}</span></li>`).join(''))}
-    ${box('Boomerangs', 'Came back to a franchise that had let him go. Ranked by started points in the return stint.', A.boomerangs.slice(0, 12).map(b => `<li><span>${P(b.pid)}<br><span class="owner">${esc(short(b.f, b.back.sy))}, back in ${years[b.back.sy]}${b.away.length ? ' after ' + b.away.map(k => esc(short(k))).join(', ') : ''}</span></span><span class="v">${n0(b.back.pts)}</span></li>`).join(''))}
+    ${box('Boomerangs', raw.redraft ? 'Let go and brought back by the same team in the same season. Ranked by started points after he came back.' : 'Came back to a franchise that had let him go. Ranked by started points in the return stint.', A.boomerangs.slice(0, 12).map(b => `<li><span>${P(b.pid)}<br><span class="owner">${esc(short(b.f, b.back.sy))}, back in ${years[b.back.sy]}${b.away.length ? ' after ' + b.away.map(k => esc(short(k))).join(', ') : ''}</span></span><span class="v">${n0(b.back.pts)}</span></li>`).join(''))}
     ${box('Longest stints', 'Weeks on one roster without leaving.', A.longest.slice(0, 12).map(s => `<li><span>${P(s.pid)}<br><span class="owner">${esc(short(s.fid, s.sy))}, ${yr(s.sy)}–${s.ey == null ? 'now' : yr(s.ey)}</span></span><span class="v">${s.wks}</span></li>`).join(''))}
   </div>`;
 }
@@ -1890,16 +1904,16 @@ function buildFacts() {
   const se = R.seasonEff[0]; add('Lineups', `${FN(se.f, se.yi)} set lineups at <b>${pct(se.eff)}</b> of the best possible score in ${years[se.yi]}, the sharpest season on record.`);
   const sp = R.seasonPF[0]; add('Weekly', `${FN(sp.f, sp.yi)} scored <b>${n0(sp.pf)}</b> regular season points in ${years[sp.yi]}, the most ever.`);
   // players
-  const tv = travel[0]; add('Players', `${P(tv[0].id)} has been rostered by <b>${tv[1]} of the ${NFR} franchises</b> across ${tv[2]} separate stints.`);
+  const tv = travel[0]; if (raw.redraft) { const rp = A.repeat[0]; if (rp) add('Players', `${FN(rp.f, rp.ys[rp.ys.length - 1])} has had ${P(rp.pid)} on his roster in <b>${rp.n} different seasons</b> (${rp.ys.map(k => years[k]).join(', ')}).`); } else add('Players', `${P(tv[0].id)} has been rostered by <b>${tv[1]} of the ${NFR} franchises</b> across ${tv[2]} separate stints.`);
   const tradedMost = A.allP.map(p => [p, S(p).filter(s => s.how.k === 'T').length]).sort((a, b) => b[1] - a[1])[0];
   add('Players', `${P(tradedMost[0])} has been traded <b>${tradedMost[1]} times</b>, more than any other player.`);
   // ping-pong: same player traded between the same two franchises 3+ times
   const pong = []; A.allP.forEach(p => { const c = {}; S(p).filter(s => s.how.k === 'T').forEach(s => { const k = Math.min(s.fid, s.how.from) + '-' + Math.max(s.fid, s.how.from); c[k] = (c[k] || 0) + 1; }); Object.entries(c).forEach(([k, n]) => n >= 3 && pong.push([p, k, n])); });
   pong.sort((a, b) => b[2] - a[2]).slice(0, 2).forEach(([p, k, n]) => { const [a, b] = k.split('-').map(Number); add('Trades', `${P(p)} was traded between ${FA(a)} and ${FA(b)} <b>${n} times</b>.`); });
-  const lg = A.longest[0]; add('Players', `${P(lg.pid)} has spent <b>${lg.wks} weeks</b> on ${lg.ey == null ? FA(lg.fid) : FN(lg.fid, lg.sy)}'s roster without ever leaving${lg.ey == null ? ', and he is still there' : ''}.`);
+  const lg = A.longest[0]; if (!raw.redraft) add('Players', `${P(lg.pid)} has spent <b>${lg.wks} weeks</b> on ${lg.ey == null ? FA(lg.fid) : FN(lg.fid, lg.sy)}'s roster without ever leaving${lg.ey == null ? ', and he is still there' : ''}.`);
   const leg = A.legends.map(x => ({ f: x.f, ...x.top[0] })).filter(x => x.pid).sort((a, b) => b.pts - a.pts)[0]; add('Players', `${P(leg.pid)} has scored <b>${n0(leg.pts)} started points</b> for ${FA(leg.f)}, the most any player has given one franchise.`);
   const bm = {}; A.boomerangs.forEach(b => { const k = b.pid + '|' + b.f; bm[k] = (bm[k] || 1) + 1; }); const bmTop = Object.entries(bm).sort((a, b) => b[1] - a[1])[0];
-  if (bmTop) { const [p, f] = bmTop[0].split('|'); add('Players', `${P(p)} has had <b>${bmTop[1]} separate stints</b> with ${FA(+f)}.`); }
+  if (bmTop && !raw.redraft) { const [p, f] = bmTop[0].split('|'); add('Players', `${P(p)} has had <b>${bmTop[1]} separate stints</b> with ${FA(+f)}.`); }
   // waivers
   const bb = A.bigBids[0]; if (bb) { const out = bb.end && bb.end.k === 'T' && bb.ed - bb.sd <= 3 ? `then traded him away ${bb.ed - bb.sd <= 1 ? 'the next day' : 'within days'}` : `and got ${n0(bb.pts)} started points from him`; add('Waiver Wire', `${FN(bb.fid, bb.sy)} spent a record <b>${money(A.bid(bb))}</b> to claim ${P(bb.pid)} in ${yr(bb.sy)}, ${out}.`); }
   const free = A.bestPickups.find(s => A.bid(s) === 0); if (free) add('Waiver Wire', `${P(free.pid)} cost ${FN(free.fid, free.sy)} nothing in ${yr(free.sy)} and returned <b>${n0(free.pts)} started points</b>.`);
@@ -2471,7 +2485,7 @@ function searchAll(raw0) {
   // players
   if (words.length) { const pw = index.filter(x => words.every(w => x.k.includes(w)) || (words.length > 1 && x.k.includes(words.join(' ')))).sort((a, b) => (b.k.startsWith(t) - a.k.startsWith(t)) || (S(b.id).length - S(a.id).length)).slice(0, res.length ? 4 : 8); pw.forEach(x => res.push({ t: 'p', id: x.id, n: x.n, sub: `${x.pos} · ${x.nfl}` })); }
   // sections
-  const sec = SECTIONS.map(x => { const k = (x[0] + ' ' + x[3]).toLowerCase(); const sc = words.filter(w => k.includes(w)).length + (k.includes(t) ? 3 : 0); return [x, sc]; }).filter(x => x[1] > 0).sort((a, b) => b[1] - a[1]).slice(0, 3);
+  const sec = SECTIONS.filter(x => TABS.includes(x[1]) && !(raw.redraft && x[2] === 'dr-journeys')).map(x => { const k = (x[0] + ' ' + x[3]).toLowerCase(); const sc = words.filter(w => k.includes(w)).length + (k.includes(t) ? 3 : 0); return [x, sc]; }).filter(x => x[1] > 0).sort((a, b) => b[1] - a[1]).slice(0, 3);
   sec.forEach(([x]) => res.push({ t: 's', n: x[0], sub: SUBL[x[1]] || x[1][0].toUpperCase() + x[1].slice(1), hash: x[1], anchor: x[2] }));
   // a season on its own
   const y = nT(t); if (y && years.includes(y) && !res.some(r => r.anchor === 'ti-' + y)) res.push({ t: 's', n: `${y} season`, sub: 'Title card', hash: 'titles', anchor: 'ti-' + y });
