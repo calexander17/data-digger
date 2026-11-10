@@ -1110,6 +1110,11 @@ const S = pid => A.stints(pid);
 const index = A.allP.map(p => ({ id: p, n: pname(p), k: pname(p).toLowerCase(), pos: raw.pl[p][1], nfl: raw.pl[p][2] }));
 const travel = index.map(x => { const st = S(x.id); return [x, new Set(st.map(s => s.fid)).size, st.length]; }).sort((a, b) => b[1] - a[1] || b[2] - a[2]);
 const META = raw.meta || {};
+// seasons before the game data (podium only, raw.early: [year, champ team, runner team, third, champ owner, runner owner])
+const EARLY_ALL = (raw.early || []).filter(e => !years.includes(e[0])).sort((a, b) => a[0] - b[0]);
+const splitO = o => (raw.co || {})[o] || [o];
+const fyOf = (() => { const m = {}; years.forEach((_, yi) => (L.fr[yi] || []).forEach((t, i) => { const o = owner(i + 1, yi); if (o) m[o] = [i + 1, yi]; })); return o => m[o] || null; })();
+const earlyTitles = f => EARLY_ALL.filter(e => e[4] && splitO(e[4]).some(o => (fyOf(o) || [])[0] === f)).length;
 const NFR = (() => { const s = new Set(); years.forEach((_, yi) => (L.fr[yi] || []).forEach((t, i) => { if (t && !(/^Team \d+$/.test(t[0]) && !t[1])) s.add(i + 1); })); return s.size || 12; })();
 if (META.name) document.querySelector('.brand h1').textContent = META.name;
 const platformOf = yi => (raw.platform && raw.platform[years[yi]]) || '';
@@ -1233,8 +1238,12 @@ function viewOverview() {
     const fin = c.final; const ws = fin ? Math.max(fin[2], fin[4]) : 0, ls = fin ? Math.min(fin[2], fin[4]) : 0;
     return `<div class="champ" style="--fcol:${fcol(c.champ)}"><div class="yr">${c.y}</div><div class="eyebrow">${esc(c.title || 'Champion')}</div><div class="nm"><button class="flink" data-f="${c.champ}">${esc(team(c.champ, c.yi)[0])}</button></div><div class="sub">${esc(owner(c.champ, c.yi))}</div><div class="sub">Beat ${esc(owner(c.runner, c.yi))}, ${n1(ws)} to ${n1(ls)}</div></div>`;
   }).join('');
-  const rows = [...A.franchises].sort((a, b) => b.titles.length - a.titles.length || (b.w / (b.w + b.l || 1)) - (a.w / (a.w + a.l || 1)));
-  const tbl = rows.map(s => `<tr><td>${FL(s.f)}</td><td class="num">${rec(s.w, s.l, s.t)}</td><td class="num hm">${pct(s.w / ((s.w + s.l + s.t) || 1))}</td><td class="num">${n0(s.pf / Math.max(1, s.seasons.length))}</td><td class="num">${s.titles.length ? `<span class="tag gold">${s.titles.length}×</span>` : '–'}</td><td class="num hm">${s.playoffs}</td><td class="num hm">${rec(s.pw, s.pl)}</td><td class="num hm">${pct(s.eff)}</td></tr>`).join('');
+  const champsEarly = EARLY_ALL.map(e => { const fy = e[4] ? fyOf(e[4]) : null; const fc = fy ? fcol(fy[0]) : 'var(--gold)';
+    return `<div class="champ" style="--fcol:${fc}"><div class="yr">${e[0]}</div><div class="eyebrow">Champion</div><div class="nm">${fy ? `<button class="flink" data-f="${fy[0]}">${esc(e[1])}</button>` : esc(e[1])}</div><div class="sub">${esc(e[4] || '')}</div><div class="sub">Beat ${esc(e[5] || e[2])} in the final${e[0] < years[0] ? ' · podium only' : ''}</div></div>`; }).join('');
+  const ET = {}; A.franchises.forEach(s0 => ET[s0.f] = earlyTitles(s0.f));
+  const nTit = s0 => s0.titles.length + (ET[s0.f] || 0);
+  const rows = [...A.franchises].sort((a, b) => nTit(b) - nTit(a) || (b.w / (b.w + b.l || 1)) - (a.w / (a.w + a.l || 1)));
+  const tbl = rows.map(s => `<tr><td>${FL(s.f)}</td><td class="num">${rec(s.w, s.l, s.t)}</td><td class="num hm">${pct(s.w / ((s.w + s.l + s.t) || 1))}</td><td class="num">${n0(s.pf / Math.max(1, s.seasons.length))}</td><td class="num">${nTit(s) ? `<span class="tag gold">${nTit(s)}×</span>` : '–'}</td><td class="num hm">${s.playoffs}</td><td class="num hm">${rec(s.pw, s.pl)}</td><td class="num hm">${pct(s.eff)}</td></tr>`).join('');
   const nT = A.trades.length;
   const pairs = Object.entries(A.partner).sort((a, b) => b[1] - a[1]);
   const [pk, pc] = pairs[0]; const [pa, pb] = pk.split('-').map(Number);
@@ -1244,8 +1253,8 @@ function viewOverview() {
   const heist = [...A.trades].sort((a, b) => b.diff - a.diff)[0];
   main.innerHTML = `
   <section class="ticker" id="ticker" aria-live="polite"><div class="tk-head"><span class="tk-label">Fun fact</span><span class="tk-n sub"></span><span class="tk-nav"><button class="btn" data-tk="prev" aria-label="Previous fact">‹</button><button class="btn" data-tk="next" aria-label="Next fact">›</button><a class="btn" href="#facts">All facts</a></span></div><p class="tk-body"></p></section>
-  <section><h2 class="sec">Champions</h2><p class="lede">Every title since ${years[0]}${META.moved ? `. The league moved from MFL to Sleeper before the ${META.moved} season` : ''}.</p></section>
-  <div class="champs">${champs}</div>
+  <section><h2 class="sec">Champions</h2><p class="lede">Every title since ${EARLY_ALL.length ? EARLY_ALL[0][0] : years[0]}${EARLY_ALL.length ? `. Game-by-game records start in ${years[0]}, so the seasons before that show the champion and runner-up only` : ''}${META.moved ? `. The league moved from MFL to Sleeper before the ${META.moved} season` : ''}.</p></section>
+  <div class="champs">${champsEarly}${champs}</div>
   <div class="facts">
     <div class="fact"><div class="eyebrow">Completed trades</div><div class="big">${nT}</div><div class="sub">Since ${years[0]}, across ${years.length} seasons</div></div>
     <div class="fact"><div class="eyebrow">Most frequent trade partners</div><div class="big">${pc}</div><div class="sub">${FS(pa)} and ${FS(pb)}</div></div>
@@ -1830,15 +1839,15 @@ function buildFacts() {
   const even = pairs.filter(p => p.n >= 8).sort((x, y) => Math.abs(x.h.w - x.h.l) - Math.abs(y.h.w - y.h.l) || y.n - x.n)[0];
   if (even) add('Rivalries', `${FA(even.a)} and ${FA(even.b)} have met ${even.n} times and the series stands at <b>${even.h.w}–${even.h.l}</b>. Total points: ${n0(even.h.pf)} to ${n0(even.h.pa)}.`);
   // titles
-  const byOwner = {}; A.champions.forEach(c => { if (!c.champ) return; const o = owner(c.champ, c.yi); (byOwner[o] = byOwner[o] || { f: c.champ, yi: c.yi, t: [] }).t.push(c.y); });
+  const byOwner = {}; EARLY_ALL.forEach(e => e[4] && splitO(e[4]).forEach(o => { const fy = fyOf(o); (byOwner[o] = byOwner[o] || { o, f: fy && fy[0], yi: fy ? fy[1] : last, t: [] }).t.push(e[0]); })); A.champions.forEach(c => { if (!c.champ) return; splitO(owner(c.champ, c.yi)).forEach(o => (byOwner[o] = byOwner[o] || { o, f: c.champ, yi: c.yi, t: [] }).t.push(c.y)); }); Object.values(byOwner).forEach(x => x.t.sort((a, b) => a - b));
   const topT = Object.values(byOwner).sort((a, b) => b.t.length - a.t.length)[0];
-  if (topT) { const t = topT.t; const b2b = t.some((y, i) => t[i + 1] === y + 1); add('Champions', `${FN(topT.f, topT.yi)} has won <b>${t.length} ${t.length === 1 ? 'title' : 'titles'}</b> (${t.join(', ')})${b2b ? ', including back-to-back championships' : ''}.`); }
-  const noRing = fr.filter(s => !s.titles.length && s.w + s.l).sort((a, b) => b.w / (b.w + b.l) - a.w / (a.w + a.l))[0];
+  if (topT) { const t = topT.t; const b2b = t.some((y, i) => t[i + 1] === y + 1); add('Champions', `${topT.f ? FN(topT.f, topT.yi) : esc(topT.o)} has won <b>${t.length} ${t.length === 1 ? 'title' : 'titles'}</b> (${t.join(', ')})${b2b ? ', including back-to-back championships' : ''}.`); }
+  const noRing = fr.filter(s => !s.titles.length && !earlyTitles(s.f) && s.w + s.l).sort((a, b) => b.w / (b.w + b.l) - a.w / (a.w + a.l))[0];
   if (noRing) add('Champions', `${FA(noRing.f)} owns the best regular season record of anyone without a title: <b>${rec(noRing.w, noRing.l, noRing.t)}</b>.`);
   const poBest = [...fr].sort((a, b) => b.pw - a.pw)[0]; add('Champions', `${FA(poBest.f)} has the most championship-bracket wins with <b>${poBest.pw}</b>.`);
-  const poApp = fr.filter(s => !s.titles.length).sort((a, b) => b.playoffs - a.playoffs)[0]; if (poApp && poApp.playoffs) add('Champions', `${FA(poApp.f)} has made the playoffs <b>${poApp.playoffs} times</b> without winning it all.`);
-  const byRunner = {}; A.champions.forEach(c => { if (!c.runner) return; const o = owner(c.runner, c.yi); (byRunner[o] = byRunner[o] || { f: c.runner, yi: c.yi, t: [] }).t.push(c.y); });
-  const topR = Object.values(byRunner).sort((a, b) => b.t.length - a.t.length)[0]; if (topR && topR.t.length > 1) add('Champions', `${FN(topR.f, topR.yi)} has lost in the title game <b>${topR.t.length} times</b> (${topR.t.join(', ')}).`);
+  const poApp = fr.filter(s => !s.titles.length && !earlyTitles(s.f)).sort((a, b) => b.playoffs - a.playoffs)[0]; if (poApp && poApp.playoffs) add('Champions', `${FA(poApp.f)} has made the playoffs <b>${poApp.playoffs} times</b> without winning it all.`);
+  const byRunner = {}; EARLY_ALL.forEach(e => e[5] && splitO(e[5]).forEach(o => { const fy = fyOf(o); (byRunner[o] = byRunner[o] || { o, f: fy && fy[0], yi: fy ? fy[1] : last, t: [] }).t.push(e[0]); })); A.champions.forEach(c => { if (!c.runner) return; splitO(owner(c.runner, c.yi)).forEach(o => (byRunner[o] = byRunner[o] || { o, f: c.runner, yi: c.yi, t: [] }).t.push(c.y)); }); Object.values(byRunner).forEach(x => x.t.sort((a, b) => a - b));
+  const topR = Object.values(byRunner).sort((a, b) => b.t.length - a.t.length)[0]; if (topR && topR.t.length > 1) add('Champions', `${topR.f ? FN(topR.f, topR.yi) : esc(topR.o)} has lost in the title game <b>${topR.t.length} times</b> (${topR.t.join(', ')}).`);
   // games
   const R = A.records;
   const ul = R.unluckyLoss[0]; if (ul) add('Weekly', `${FN(ul.f, ul.yi)} scored <b>${n1(ul.s)}</b> in ${wk(ul.yi, ul.w)} and still lost to ${FN(ul.opp, ul.yi)}.`);
@@ -2301,7 +2310,7 @@ const nT = t => { const yr0 = (t.match(/\b(20\d\d)\b/) || [])[1]; return yr0 ? +
 function answers(t) {
   const out = []; const ppl = findPeople(t); const y = nT(t); const yi = y != null ? years.indexOf(y) : -1;
   const add = (html, hash, anchor, prep) => out.push({ t: 'ans', html, hash, anchor, prep });
-  const trophy = () => { const c = {}; A.champions.forEach(x => { if (x.champ) { const o = owner(x.champ, x.yi); (c[o] = c[o] || []).push(x.y); } }); return Object.entries(c).sort((a, b) => b[1].length - a[1].length); };
+  const trophy = () => { const c = {}; EARLY_ALL.forEach(e => e[4] && splitO(e[4]).forEach(o => (c[o] = c[o] || []).push(e[0]))); A.champions.forEach(x => { if (x.champ) splitO(owner(x.champ, x.yi)).forEach(o => (c[o] = c[o] || []).push(x.y)); }); Object.values(c).forEach(v => v.sort((a, b) => a - b)); return Object.entries(c).sort((a, b) => b[1].length - a[1].length); };
   // two people: head to head
   if (ppl.length >= 2 && /\bvs\.?\b|versus|against|\band\b|head|h2h|rival|record|beat|&|,/.test(t)) {
     const [a, b] = ppl; let w = 0, l = 0, tt = 0;
