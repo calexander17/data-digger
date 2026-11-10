@@ -1043,6 +1043,90 @@ function dealBox(trIdx, selfId) {
   return `<details><summary>See the full trade</summary><div class="deal">${side(t.f2, t.g1)}${side(t.f1, t.g2)}<div><button class="tlink" data-t="${t.i}">Open in the trade log</button></div></div></details>`;
 }
 
+
+/* ---------- TITLES ---------- */
+const SRC = { R: ['Rookie draft', 'var(--accent)'], S: ['Startup draft', 'color-mix(in srgb, var(--accent) 45%, var(--soft))'], T: ['Trade', 'var(--win)'], W: ['Waiver claim', 'oklch(0.62 0.13 250)'], A: ['Free agent', 'oklch(0.7 0.12 300)'], O: ['Original roster', 'var(--muted)'] };
+function viewTitles() {
+  const TB = A.titleBuilds || [];
+  if (!TB.length) { main.innerHTML = `<section><h2 class="sec">Titles</h2><p class="lede">No champion has been crowned yet.</p></section>`; return; }
+  const firstY = years[0];
+  const src = st => { const k = st.how.k; if (k === 'D') { const y = +(String(st.how.x || '').split(' ')[0]); const rd = +(String(st.how.x || '').split(' ')[1] || '').split('.')[0]; return (y === firstY && rd > 6) || rd > 6 ? 'S' : 'R'; } return k === 'T' || k === 'W' || k === 'A' ? k : 'O'; };
+  const allPlay = (f, yi) => { let w = 0, l = 0; const byW = {}; A.games.filter(g => g.yi === yi && g.reg).forEach(g => { (byW[g.w] = byW[g.w] || []).push([g.a, g.sa], [g.b, g.sb]); }); Object.values(byW).forEach(v => { const me = v.find(x => x[0] === f); if (!me) return; v.forEach(x => { if (x[0] === f) return; if (me[1] > x[1]) w++; else if (me[1] < x[1]) l++; }); }); return [w, l]; };
+  const pfRank = (f, yi) => [...A.standings[yi]].sort((a, b) => b.pf - a.pf).findIndex(r => r.f === f) + 1;
+  const T = TB.map(b => {
+    const st = A.standings[b.yi].find(r => r.f === b.f) || {}; const fin = b.final; const rn = A.champions[b.yi].runner;
+    const br = A.playoff[b.yi].find(x => x.winner === b.f && x.games.some(g => g === fin)) || A.playoff[b.yi].find(x => x.winner === b.f);
+    const path = br ? br.games.filter(g => g[1] === b.f || g[3] === b.f).sort((x, y) => x[0] - y[0]).map(g => { const me = g[1] === b.f; return { w: g[0], opp: me ? g[3] : g[1], s: me ? g[2] : g[4], o: me ? g[4] : g[2] }; }) : [];
+    const ws = fin ? (fin[1] === b.f ? fin[2] : fin[4]) : 0, ls = fin ? (fin[1] === b.f ? fin[4] : fin[2]) : 0;
+    const starters = b.starters.map(x => ({ ...x, src: src(x) }));
+    const byS = {}; starters.forEach(x => byS[x.src] = (byS[x.src] || 0) + x.fp);
+    const games = A.games.filter(g => g.yi === b.yi && g.reg && (g.a === b.f || g.b === b.f)).sort((x, y) => x.w - y.w);
+    const half = games.slice(0, Math.ceil(games.length / 2)); const hw = half.filter(g => (g.a === b.f ? g.sa > g.sb : g.sb > g.sa)).length;
+    return { ...b, st, rn, path, ws, ls, starters, byS, ap: allPlay(b.f, b.yi), pfr: pfRank(b.f, b.yi), mvp: starters[0], half: [hw, half.length - hw] };
+  });
+  // trophy case by owner
+  const trophy = {}; A.champions.forEach(c => { if (c.champ) { const o = owner(c.champ, c.yi); const t = trophy[o] = trophy[o] || { o, f: c.champ, yi: c.yi, t: [], r: [] }; t.t.push(c.y); t.f = c.champ; t.yi = c.yi; } if (c.runner) { const o = owner(c.runner, c.yi); const t = trophy[o] = trophy[o] || { o, f: c.runner, yi: c.yi, t: [], r: [] }; t.r.push(c.y); } });
+  const tc = Object.values(trophy).sort((a, b) => b.t.length - a.t.length || b.r.length - a.r.length || a.o.localeCompare(b.o));
+  const nameBtn = r => `<span class="fdot" style="--fcol:${fcol(r.f)}"></span><button class="flink" data-f="${r.f}">${esc(r.o)}</button>`;
+  const case_ = `<section class="card" id="ti-case"><div class="pad"><h3>Trophy case</h3><p class="sub">Every owner who has won it all or reached the final.</p></div><div class="tbl"><table><thead><tr><th>Owner</th><th class="num">Titles</th><th class="num">Finals lost</th><th>Years</th></tr></thead><tbody>${tc.map(r => `<tr><td>${nameBtn(r)}</td><td class="num"><b>${r.t.length || '–'}</b></td><td class="num">${r.r.length || '–'}</td><td>${r.t.map(y => `<span class="tag gold">${y}</span>`).join(' ')} ${r.r.map(y => `<span class="tag">${y}</span>`).join(' ')}</td></tr>`).join('')}</tbody></table></div></section>`;
+  // title DNA
+  const tot = {}; T.forEach(t => Object.entries(t.byS).forEach(([k, v]) => tot[k] = (tot[k] || 0) + v)); const sum = Object.values(tot).reduce((a, b) => a + b, 0) || 1;
+  const bar = byS => { const t0 = Object.values(byS).reduce((a, b) => a + b, 0) || 1; return `<div style="display:flex;height:12px;border-radius:6px;overflow:hidden;background:var(--soft)">${Object.keys(SRC).filter(k => byS[k]).map(k => `<i title="${SRC[k][0]} ${n1(byS[k])}" style="width:${byS[k] / t0 * 100}%;background:${SRC[k][1]}"></i>`).join('')}</div>`; };
+  const legend = `<div style="display:flex;flex-wrap:wrap;gap:6px 14px;margin-top:8px;font-size:13px">${Object.keys(SRC).filter(k => tot[k]).map(k => `<span><i style="display:inline-block;width:10px;height:10px;border-radius:2px;background:${SRC[k][1]};margin-right:5px"></i>${SRC[k][0]} <span class="owner">${Math.round(tot[k] / sum * 100)}%</span></span>`).join('')}</div>`;
+  const dna = `<section class="card pad" id="ti-dna"><h3>Title DNA</h3><p class="sub">Where the points in every championship game came from, by how the champion got each starter.</p><div style="margin-top:10px">${bar(tot)}</div>${legend}</section>`;
+  // ring leaders
+  const rings = {}; T.forEach(t => t.starters.forEach(x => { const r = rings[x.pid] = rings[x.pid] || { pid: x.pid, n: 0, ys: [], pts: 0 }; r.n++; r.ys.push(t.y); r.pts += x.fp; }));
+  const RL = Object.values(rings).filter(r => r.n > 1).sort((a, b) => b.n - a.n || b.pts - a.pts).slice(0, 10);
+  const mvps = [...T].filter(t => t.mvp).sort((a, b) => b.mvp.fp - a.mvp.fp).slice(0, 8);
+  // facts
+  const fs0 = (eb, html) => `<div class="fact"><div class="eyebrow">${eb}</div><div>${html}</div></div>`;
+  const low = [...T].sort((a, b) => b.st.rank - a.st.rank)[0];
+  const worstRec = [...T].sort((a, b) => (a.st.w / Math.max(1, a.st.g)) - (b.st.w / Math.max(1, b.st.g)))[0];
+  const close = [...T].filter(t => t.ws).sort((a, b) => (a.ws - a.ls) - (b.ws - b.ls))[0];
+  const blow = [...T].filter(t => t.ws).sort((a, b) => (b.ws - b.ls) - (a.ws - a.ls))[0];
+  const hi = [...T].filter(t => t.ws).sort((a, b) => b.ws - a.ws)[0];
+  const slow = [...T].sort((a, b) => (a.half[0] / Math.max(1, a.half[0] + a.half[1])) - (b.half[0] / Math.max(1, b.half[0] + b.half[1])))[0];
+  const ones = years.map((y, yi) => A.champions[yi].champ ? [yi, A.standings[yi][0].f === A.champions[yi].champ] : null).filter(Boolean); const oneW = ones.filter(x => x[1]).length;
+  const tradeHeavy = [...T].sort((a, b) => ((b.byS.T || 0) / Math.max(1, Object.values(b.byS).reduce((x, y) => x + y, 0))) - ((a.byS.T || 0) / Math.max(1, Object.values(a.byS).reduce((x, y) => x + y, 0))))[0];
+  const tradeShare = t => Math.round((t.byS.T || 0) / Math.max(1, Object.values(t.byS).reduce((x, y) => x + y, 0)) * 100);
+  const homeHeavy = [...T].sort((a, b) => (((b.byS.R || 0) + (b.byS.S || 0)) / Math.max(1, Object.values(b.byS).reduce((x, y) => x + y, 0))) - (((a.byS.R || 0) + (a.byS.S || 0)) / Math.max(1, Object.values(a.byS).reduce((x, y) => x + y, 0))))[0];
+  const homeShare = t => Math.round(((t.byS.R || 0) + (t.byS.S || 0)) / Math.max(1, Object.values(t.byS).reduce((x, y) => x + y, 0)) * 100);
+  const heart = tc.filter(r => r.r.length).sort((a, b) => b.r.length - a.r.length)[0];
+  const repeat = T.filter((t, i) => i && T[i - 1].f === t.f && owner(T[i - 1].f, T[i - 1].yi) === owner(t.f, t.yi));
+  const droughtY = years[last]; const champsAll = new Set(T.map(t => owner(t.f, t.yi))); const never = [...new Set(Array.from({ length: 12 }, (_, i) => owner(i + 1)))].filter(o => o && !champsAll.has(o));
+  const facts = `<div class="facts">${[
+    low ? fs0('Lowest seed to win it', `${FS(low.f, low.yi)} won ${low.y} as the regular season's No. ${low.st.rank}, ${rec(low.st.w, low.st.l, low.st.t)}.`) : '',
+    worstRec && worstRec !== low ? fs0('Worst record for a champion', `${FS(worstRec.f, worstRec.yi)} went ${rec(worstRec.st.w, worstRec.st.l, worstRec.st.t)} in ${worstRec.y} and still took the title.`) : '',
+    fs0('Top seeds', `The regular-season No. 1 has won <b>${oneW} of ${ones.length}</b> titles.`),
+    slow ? fs0('Slowest start', `${FS(slow.f, slow.yi)} was ${slow.half[0]}–${slow.half[1]} at the halfway point of ${slow.y} and won it all.`) : '',
+    close ? fs0('Closest final', `${close.y}: ${FS(close.f, close.yi)} beat ${FS(close.rn, close.yi)} by <b>${n1(close.ws - close.ls)}</b>, ${n1(close.ws)} to ${n1(close.ls)}.`) : '',
+    blow && blow !== close ? fs0('Biggest blowout final', `${blow.y}: ${FS(blow.f, blow.yi)} won by <b>${n1(blow.ws - blow.ls)}</b> over ${FS(blow.rn, blow.yi)}.`) : '',
+    hi ? fs0('Highest title-game score', `<b>${n1(hi.ws)}</b> by ${FS(hi.f, hi.yi)} in ${hi.y}.`) : '',
+    tradeHeavy && tradeShare(tradeHeavy) > 0 ? fs0('Built on trades', `<b>${tradeShare(tradeHeavy)}%</b> of ${FS(tradeHeavy.f, tradeHeavy.yi)}'s ${tradeHeavy.y} title-game points came from players acquired by trade.`) : '',
+    homeHeavy && homeShare(homeHeavy) > 0 ? fs0('Built through the draft', `<b>${homeShare(homeHeavy)}%</b> of ${FS(homeHeavy.f, homeHeavy.yi)}'s ${homeHeavy.y} title-game points came from players he drafted.`) : '',
+    heart ? fs0('Most finals lost', `${nameBtn(heart)} has lost <b>${heart.r.length}</b> championship games (${heart.r.join(', ')}).`) : '',
+    repeat.length ? fs0('Back to back', repeat.map(t => `${FS(t.f, t.yi)} in ${t.y - 1} and ${t.y}`).join('; ') + '.') : fs0('Back to back', 'Nobody has repeated as champion yet.'),
+    never.length ? fs0('Still waiting', `${never.length} current owners have never won a title here: ${never.map(o => esc(o.split(' ')[0])).join(', ')}.`) : '',
+  ].join('')}</div>`;
+  // title by title
+  const card = t => `<section class="card pad ti-card" id="ti-${t.y}" style="border-top:4px solid ${fcol(t.f)}">
+    <div style="display:flex;flex-wrap:wrap;gap:6px 12px;align-items:baseline"><span class="tag gold">${t.y}</span><h3 style="margin:0">${esc(team(t.f, t.yi)[0])}</h3><span class="owner">${esc(owner(t.f, t.yi))}</span></div>
+    <p class="sub" style="margin-top:6px">Beat ${FS(t.rn, t.yi)} ${n1(t.ws)} to ${n1(t.ls)} in the final. Regular season ${rec(t.st.w || 0, t.st.l || 0, t.st.t)}, No. ${t.st.rank} seed, ${ord(t.pfr)} in points, ${t.ap[0]}–${t.ap[1]} against the whole league.</p>
+    ${t.path.length ? `<div class="hx"><div><span class="eyebrow">Path</span> ${t.path.map(g => `Wk ${g.w} ${g.s >= g.o ? 'beat' : 'lost to'} ${esc(short(g.opp, t.yi))} ${n1(g.s)}–${n1(g.o)}`).join(' · ')}</div></div>` : ''}
+    ${t.mvp ? `<div class="hx"><div><span class="eyebrow">Final MVP</span> ${P(t.mvp.pid)} ${n1(t.mvp.fp)}</div></div>` : ''}
+    <div style="margin-top:10px">${bar(t.byS)}</div>
+    <details style="margin-top:8px"><summary class="owner" style="cursor:pointer">The title-game lineup</summary><ol class="list" style="margin-top:6px">${t.starters.map(x => `<li><span>${P(x.pid)} <span class="owner">${esc(SRC[x.src][0].toLowerCase())}${x.how.k === 'T' || x.how.k === 'W' || x.how.k === 'A' ? ', ' + fmt(x.sd) : x.how.k === 'D' && x.how.x ? ' ' + esc(x.how.x) : ''}</span></span><span class="v">${n1(x.fp)}</span></li>`).join('')}</ol></details></section>`;
+  const nav = `<div class="pills jump">${[['ti-case', 'Trophy case'], ['ti-dna', 'Title DNA'], ['ti-rings', 'Ring leaders'], ['ti-list', 'Every title']].map(([id, t]) => `<a class="pill" href="#${id}" data-jump="${id}">${t}</a>`).join('')}</div>`;
+  main.innerHTML = `<section><h2 class="sec">Titles</h2><p class="lede">${T.length} champions since ${years[0]}: who won, how they got there, and where the players in every title game came from.</p></section>${nav}
+    ${facts}
+    <div class="grid2">${case_}<div style="display:grid;gap:16px;align-content:start">${dna}
+      <section class="card pad" id="ti-rings"><h3>Ring leaders</h3><p class="sub">Players who started in the most title-game wins, for any team.</p>${RL.length ? `<ol class="list">${RL.map((r, i) => `<li><span><span class="rk">${i + 1}</span>${P(r.pid)} <span class="owner">${r.ys.join(', ')}</span></span><span class="v">${r.n}</span></li>`).join('')}</ol>` : '<p class="sub">Nobody has started in two winning finals yet.</p>'}</section>
+      <section class="card pad"><h3>Biggest title-game performances</h3><ol class="list">${mvps.map((t, i) => `<li><span><span class="rk">${i + 1}</span>${P(t.mvp.pid)} <span class="owner">for ${esc(short(t.f, t.yi))}, ${t.y}</span></span><span class="v">${n1(t.mvp.fp)}</span></li>`).join('')}</ol></section></div></div>
+    <section id="ti-list"><h2 class="sec" style="font-size:24px;margin-top:8px">Every title, how it was built</h2><p class="lede">Each title-game lineup split by where its points came from. Open a card to see every starter and how he arrived.</p></section>
+    <div class="grid2">${[...T].reverse().map(card).join('')}</div>`;
+  main.querySelectorAll('[data-jump]').forEach(a => a.onclick = e => { e.preventDefault(); const el = document.getElementById(a.dataset.jump); if (el) el.scrollIntoView({ behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'start' }); });
+}
+
 /* ---------- OVERVIEW ---------- */
 function viewOverview() {
   const champs = A.champions.map(c => {
@@ -1238,7 +1322,7 @@ function tradeRoom() {
       <div class="owner" style="margin-top:4px">${got.length ? got.map(x => `${P(x.pid)} <b style="color:var(--ink)">${n1(x.fp)}</b> in the final, ${howGot(x)}`).join('<br>') : 'Every starter in the final was drafted or already on the roster.'}${got.length && home ? `<br>Plus ${home} drafted or longtime starters.` : ''}</div></li>`; }).join('');
   const poS = (poT.length || tb) ? `<section class="card pad" id="tr-playoffs"><h3>Playoff difference-makers</h3><p class="sub">Moves judged by the first championship bracket after they happened: started points in playoff games for the team that made the move. A deadline deal counts that December, and an offseason deal counts the next one. A title tag means he started in the championship game and his team won it.</p>
     <div class="grid2" style="margin-top:8px"><div><h3 style="font-size:16px">Trades</h3><ol class="list">${poL}</ol></div><div><h3 style="font-size:16px">Waiver and free-agent pickups</h3><ol class="list">${poP}</ol></div></div>
-    ${tb ? `<h3 style="margin-top:18px">How every title was built</h3><p class="sub">The starters in each championship game who arrived by trade or pickup, and what they scored in the final.</p><ol class="list">${tb}</ol>` : ''}</section>` : '';
+    ${tb ? `<p class="sub" style="margin-top:14px">How every title-game lineup was put together now lives on its own page: <a href="#titles">League, then Titles</a>.</p>` : ''}</section>` : '';
   // marks and nemeses
   const marks = O.map(r => { const v = Object.entries(r.vs).filter(([, x]) => x.n >= 3); if (!v.length) return null; const best = v.sort((a, b) => b[1].net - a[1].net)[0], worst = [...v].sort((a, b) => a[1].net - b[1].net)[0]; return { r, best, worst }; }).filter(Boolean).sort((a, b) => b.r.net - a.r.net);
   const mk = `<section class="card" id="tr-marks"><div class="pad"><h3>Favorite marks and nemeses</h3><p class="sub">For every owner, the trade partner he has taken the most from and the one who has taken the most from him. At least three trades together.</p></div><div class="tbl"><table><thead><tr><th>Owner</th><th class="hm">Favorite mark</th><th class="hm">Nemesis</th></tr></thead><tbody>${marks.map(m => { const mkH = m.best[1].net > 0 ? `${OS(m.best[0])} <span style="color:var(--win)">${sw(m.best[1].net)}</span> <span class="owner">in ${m.best[1].n}</span>` : '<span class="owner">nobody yet</span>'; const nmH = m.worst[1].net < 0 ? `${OS(m.worst[0])} <span style="color:var(--loss)">${sw(m.worst[1].net)}</span> <span class="owner">in ${m.worst[1].n}</span>` : '<span class="owner">nobody yet</span>'; return `<tr><td>${ON(m.r.o)}<div class="onlym onlyg" style="margin-top:4px"><span><span class="eyebrow">Mark</span> ${mkH}</span><span><span class="eyebrow">Nemesis</span> ${nmH}</span></div></td><td class="hm">${m.best[1].net > 0 ? `${OS(m.best[0])} <span style="color:var(--win)">${sw(m.best[1].net)}</span> <span class="owner">in ${m.best[1].n}</span>` : '<span class="owner">nobody yet</span>'}</td><td class="hm">${m.worst[1].net < 0 ? `${OS(m.worst[0])} <span style="color:var(--loss)">${sw(m.worst[1].net)}</span> <span class="owner">in ${m.worst[1].n}</span>` : '<span class="owner">nobody yet</span>'}</td></tr>`; }).join('')}</tbody></table></div></section>`;
@@ -1947,7 +2031,7 @@ function crossFacts(add) {
 }
 
 /* ---------- routing ---------- */
-const TABS = ['overview', 'week', 'facts', 'players', 'trades', 'picks', 'future', 'waivers', 'franchises', 'rivalries', 'records', 'crossover'];
+const TABS = ['overview', 'titles', 'week', 'facts', 'players', 'trades', 'picks', 'future', 'waivers', 'franchises', 'rivalries', 'records', 'crossover'];
 if (!raw.cross) TABS.splice(TABS.indexOf('crossover'), 1);
 if (!raw.sched) TABS.splice(TABS.indexOf('week'), 1);
 // six top-level groups; the ones with several pages get a row of sub-tabs
@@ -1960,10 +2044,10 @@ const ICON = {
   draft: '<path d="M8 4h8v2.5H8z M6 5.5H4.5v15h15v-15H18 M8 11h8 M8 14.5h8 M8 18h5" />',
   crossover: '<circle cx="9" cy="12" r="5"/><circle cx="15" cy="12" r="5"/>',
 };
-const SUBL = { overview: 'Overview', franchises: 'Franchises', rivalries: 'Rivalries', records: 'Records', facts: 'Fun Facts', trades: 'Trades', picks: 'Draft', waivers: 'Waiver Wire' };
+const SUBL = { overview: 'Overview', titles: 'Titles', franchises: 'Franchises', rivalries: 'Rivalries', records: 'Records', facts: 'Fun Facts', trades: 'Trades', picks: 'Draft', waivers: 'Waiver Wire' };
 const GROUPS = [
   { k: 'week', label: 'This Week', short: 'Week', tabs: ['week'] },
-  { k: 'league', label: 'League', tabs: ['overview', 'franchises', 'rivalries', 'records', 'facts'] },
+  { k: 'league', label: 'League', tabs: ['overview', 'titles', 'franchises', 'rivalries', 'records', 'facts'] },
   { k: 'players', label: 'Players', tabs: ['players'] },
   { k: 'deals', label: 'Deals', tabs: ['trades', 'waivers'] },
   { k: 'draft', label: 'Draft', tabs: ['picks'] },
@@ -2012,7 +2096,7 @@ function route(keepScroll) {
   document.getElementById('subin').innerHTML = g.tabs.map(t => `<a href="#${t}" aria-current="${t === tab ? 'page' : 'false'}">${SUBL[t] || t}</a>`).join('');
   document.body.dataset.tab = tab;
   clearInterval(tickTimer);
-  ({ overview: viewOverview, week: viewWeek, facts: viewFacts, players: () => viewPlayers(arg), trades: () => viewTrades(arg), picks: viewPicks, future: viewFuture, waivers: viewWaivers, franchises: () => viewFranchises(arg), rivalries: viewRivalries, records: viewRecords, crossover: viewCross })[tab]();
+  ({ overview: viewOverview, titles: viewTitles, week: viewWeek, facts: viewFacts, players: () => viewPlayers(arg), trades: () => viewTrades(arg), picks: viewPicks, future: viewFuture, waivers: viewWaivers, franchises: () => viewFranchises(arg), rivalries: viewRivalries, records: viewRecords, crossover: viewCross })[tab]();
   const cur = sub.querySelector('a[aria-current="page"]'); if (cur && !sub.hidden) cur.scrollIntoView({ inline: 'nearest', block: 'nearest' });
   layout();
 }
