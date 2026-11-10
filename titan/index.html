@@ -134,12 +134,16 @@ nav.tabs a svg{width:16px;height:16px;flex:none;opacity:.85}
   .band.searching .top{flex-wrap:wrap}
   .band.searching .search{display:block}
   nav.tabs{position:fixed;left:0;right:0;bottom:0;z-index:20;display:grid;grid-template-columns:repeat(var(--ntabs,6),minmax(0,1fr));gap:0;background:#14213d;border-top:2px solid var(--accent);padding:0 max(4px,env(safe-area-inset-right,0px)) env(safe-area-inset-bottom,0px) max(4px,env(safe-area-inset-left,0px));box-shadow:0 -4px 16px rgb(0 0 0 / .18);overflow:visible}
-  nav.tabs a{flex-direction:column;gap:3px;justify-content:center;font-size:10.5px;letter-spacing:.03em;padding:8px 2px 7px;border-radius:0;min-height:54px;text-align:center;white-space:nowrap;overflow:hidden}
+  nav.tabs a{flex-direction:column;gap:3px;justify-content:center;font-size:10px;letter-spacing:.02em;padding:8px 1px 7px;border-radius:0;min-height:54px;text-align:center;white-space:nowrap;overflow:hidden}
   nav.tabs a span{overflow:hidden;text-overflow:ellipsis;max-width:100%}
   nav.tabs a svg{width:22px;height:22px}
   nav.tabs a[aria-current="page"]{background:transparent;color:#ff9a6c}
   nav.tabs a[aria-current="page"] svg{opacity:1}
   main{padding-bottom:calc(84px + env(safe-area-inset-bottom,0px))}
+}
+@media (max-width:380px){
+  nav.tabs a{font-size:9px;letter-spacing:0;padding-inline:0}
+  nav.tabs a svg{width:20px;height:20px}
   .subin{padding-block:8px}
   .subin a{font-size:13.5px;padding:6px 12px}
   h2.sec{font-size:24px}
@@ -1880,6 +1884,7 @@ const ICON = {
   players: '<circle cx="12" cy="8.5" r="3.6"/><path d="M5 20a7 7 0 0 1 14 0" />',
   deals: '<path d="M4 8h13l-3.5-3.5 M20 16H7l3.5 3.5" />',
   future: '<path d="M4 18 10 12l3.5 3.5L20 8.5 M15 8.5h5v5" />',
+  draft: '<path d="M8 4h8v2.5H8z M6 5.5H4.5v15h15v-15H18 M8 11h8 M8 14.5h8 M8 18h5" />',
   crossover: '<circle cx="9" cy="12" r="5"/><circle cx="15" cy="12" r="5"/>',
 };
 const SUBL = { overview: 'Overview', franchises: 'Franchises', rivalries: 'Rivalries', records: 'Records', facts: 'Fun Facts', trades: 'Trades', picks: 'Draft', waivers: 'Waiver Wire' };
@@ -1887,7 +1892,8 @@ const GROUPS = [
   { k: 'week', label: 'This Week', short: 'Week', tabs: ['week'] },
   { k: 'league', label: 'League', tabs: ['overview', 'franchises', 'rivalries', 'records', 'facts'] },
   { k: 'players', label: 'Players', tabs: ['players'] },
-  { k: 'deals', label: 'Deals', tabs: ['trades', 'picks', 'waivers'] },
+  { k: 'deals', label: 'Deals', tabs: ['trades', 'waivers'] },
+  { k: 'draft', label: 'Draft', tabs: ['picks'] },
   { k: 'future', label: 'Future', tabs: ['future'] },
   { k: 'crossover', label: 'Crossover', short: 'Cross', tabs: ['crossover'] },
 ].map(g => ({ ...g, tabs: g.tabs.filter(t => TABS.includes(t)) })).filter(g => g.tabs.length);
