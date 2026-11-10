@@ -279,7 +279,7 @@ svg text{fill:var(--muted);font-family:var(--cond);font-size:11px}
     <button class="sbtn" id="sbtn" type="button" aria-label="Search players" aria-expanded="false"><svg class="ic-s" viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><circle cx="11" cy="11" r="7" fill="none" stroke="currentColor" stroke-width="2.4"/><path d="M16.5 16.5 21 21" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></svg><svg class="ic-x" viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></svg></button>
     <div class="search" id="combo">
       <label for="q" hidden>Find a player</label>
-      <input id="q" type="search" autocomplete="off" placeholder="Find any player…" aria-controls="sugg" aria-autocomplete="list">
+      <input id="q" type="search" autocomplete="off" placeholder="Search or ask a question…" aria-controls="sugg" aria-autocomplete="list">
       <ul class="sugg" id="sugg" role="listbox" hidden></ul>
     </div>
   </div>
@@ -1700,7 +1700,7 @@ function viewRivalries() {
 function viewRecords() {
   const R = A.records;
   const tw = (x, val) => `<li><span>${FS(x.f, x.yi)} <span class="owner">${years[x.yi]} wk ${x.w}${x.reg ? '' : ', playoffs'}</span></span><span class="v">${val}</span></li>`;
-  const box = (title, sub, items) => `<section class="card pad"><h3>${title}</h3><p class="sub">${sub}</p><ol class="list">${items}</ol></section>`;
+  const box = (title, sub, items) => `<section class="card pad" id="rec-${slug(title)}"><h3>${title}</h3><p class="sub">${sub}</p><ol class="list">${items}</ol></section>`;
   main.innerHTML = `<section><h2 class="sec">Record book</h2><p class="lede">Single weeks and full seasons, ${years[0]} through this week.</p></section>
   <div class="grid3">
     ${box('Highest-scoring weeks', 'Team points in one week.', R.highWeek.map(x => tw(x, n1(x.s))).join(''))}
@@ -2111,25 +2111,147 @@ document.addEventListener('click', e => {
   const f = e.target.closest('[data-f]'); if (f) { e.preventDefault(); go('f' + f.dataset.f); }
 });
 
-/* ---------- search ---------- */
+/* ---------- search and questions ---------- */
 const q = $('#q'), ul = $('#sugg'), combo = $('#combo');
 let hits = [], sel = -1;
-function draw() { ul.hidden = !hits.length; ul.innerHTML = hits.map((h, i) => `<li role="option" aria-selected="${i === sel}" data-p="${h.id}"><span>${esc(h.n)}</span><small>${esc(h.pos)} · ${esc(h.nfl)}</small></li>`).join(''); }
-q.addEventListener('input', () => {
-  const t = q.value.trim().toLowerCase(); sel = -1;
-  if (t.length < 2) { hits = []; return draw(); }
-  const words = t.split(/\s+/);
-  hits = index.filter(x => words.every(w => x.k.includes(w))).sort((a, b) => (b.k.startsWith(t) - a.k.startsWith(t)) || (S(b.id).length - S(a.id).length)).slice(0, 12);
-  draw();
-});
+const slug = t => String(t).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+// people: every owner who has run a franchise, matched by full name or first name
+const PEOPLE = (() => { const m = new Map(); years.forEach((_, yi) => { for (let f = 1; f <= 12; f++) { const o = owner(f, yi); if (!o) continue; const r = m.get(o) || { o, f, yi, ys: [] }; r.f = f; r.yi = yi; r.ys.push(yi); m.set(o, r); } }); return [...m.values()]; })();
+const firstCount = {}; PEOPLE.forEach(p => { const k = p.o.split(' ')[0].toLowerCase(); firstCount[k] = (firstCount[k] || 0) + 1; });
+const findPeople = t => { const out = []; PEOPLE.forEach(p => { const full = p.o.toLowerCase(), first = full.split(' ')[0], lastN = full.split(' ').slice(-1)[0]; const re = w => new RegExp(`(^|[^a-z])${w.replace(/[^a-z]/g, '')}('s)?([^a-z]|$)`); let at = -1; const m1 = t.indexOf(full); if (m1 >= 0) at = m1; else if (re(first).test(t) && firstCount[first] === 1) at = t.search(re(first)); else if (lastN.length > 3 && full.split(' ').length > 1 && re(lastN).test(t)) at = t.search(re(lastN)); if (at >= 0) out.push({ ...p, at }); }); return out.sort((a, b) => a.at - b.at); };
+const sh = o => { const p = o.split(' '); return p.length > 1 ? `${p[0]} ${p[p.length - 1][0]}.` : o; };
+// sections people might ask for
+const SECTIONS = [
+  ['Titles and trophy case', 'titles', 'ti-case', 'titles title championships champion champions trophy rings ring won it all'],
+  ['Title DNA', 'titles', 'ti-dna', 'title dna built how titles were built'],
+  ['Every title, how it was built', 'titles', 'ti-list', 'title game final lineup championship game'],
+  ['Ring leaders', 'titles', 'ti-rings', 'ring leaders rings most titles players'],
+  ['Trade report card', 'trades', 'tr-card', 'trade report card best trader worst trader trades graded'],
+  ['Who fleeced whom', 'trades', 'tr-fleece', 'fleeced fleece who screwed matrix'],
+  ['Biggest heists', 'trades', 'tr-heists', 'heist heists lopsided best trade worst trade robbery'],
+  ['Playoff difference-makers', 'trades', 'tr-playoffs', 'playoff playoffs difference makers deadline clutch'],
+  ['Favorite marks and nemeses', 'trades', 'tr-marks', 'mark nemesis nemeses'],
+  ['Trade log', 'trades', 'tr-log', 'trade log all trades every trade history'],
+  ['Draft report card', 'picks', 'dr-card', 'draft drafting drafter rookie draft grade report card best drafter'],
+  ['Draft classes', 'picks', 'dr-classes', 'draft class classes rookie class'],
+  ['Pick journeys', 'picks', 'dr-journeys', 'pick journey traded picks path'],
+  ['Hit rates', 'picks', 'dr-hits', 'hit rate hits busts steals'],
+  ['Contention windows', 'future', 'fc-windows', 'future contend contention window rebuild projection dynasty'],
+  ['Pick capital', 'future', 'fc-picks', 'pick capital future picks owned draft picks'],
+  ['Age curve', 'future', 'fc-age', 'age oldest youngest roster age'],
+  ['Luck report', 'week', 'wk-luck', 'luck lucky unlucky all-play all play'],
+  ['Power rankings', 'week', 'wk-power', 'power rankings rank'],
+  ['Playoff odds', 'week', 'wk-odds', 'playoff odds chances simulations'],
+  ['This week\'s matchups', 'week', 'wk-preview', 'matchup matchups preview this week next week'],
+  ['Weekly recap', 'week', 'wk-recap', 'recap last week column'],
+  ['Waiver wire and FAAB', 'waivers', null, 'waiver waivers faab bid bids pickup pickups free agent'],
+  ['Record book', 'records', null, 'records record book highest lowest blowout closest bench'],
+  ['Rivalries', 'rivalries', null, 'rivalry rivalries head to head h2h'],
+  ['Franchises', 'franchises', null, 'franchise franchises teams team history'],
+  ['Fun facts', 'facts', null, 'fun facts trivia'],
+  ['Overview and standings', 'overview', null, 'overview standings champions history all-time'],
+  ['Crossover: all three leagues', 'crossover', null, 'crossover other leagues multiverse across leagues'],
+].filter(x => TABS.includes(x[1]));
+const nT = t => { const yr0 = (t.match(/\b(20\d\d)\b/) || [])[1]; return yr0 ? +yr0 : null; };
+function answers(t) {
+  const out = []; const ppl = findPeople(t); const y = nT(t); const yi = y != null ? years.indexOf(y) : -1;
+  const add = (html, hash, anchor, prep) => out.push({ t: 'ans', html, hash, anchor, prep });
+  const trophy = () => { const c = {}; A.champions.forEach(x => { if (x.champ) { const o = owner(x.champ, x.yi); (c[o] = c[o] || []).push(x.y); } }); return Object.entries(c).sort((a, b) => b[1].length - a[1].length); };
+  // two people: head to head
+  if (ppl.length >= 2 && /\bvs\.?\b|versus|against|\band\b|head|h2h|rival|record|beat|&|,/.test(t)) {
+    const [a, b] = ppl; let w = 0, l = 0, tt = 0;
+    A.games.forEach(g => { const oa = owner(g.a, g.yi), ob = owner(g.b, g.yi); let sa, sb; if (oa === a.o && ob === b.o) { sa = g.sa; sb = g.sb; } else if (oa === b.o && ob === a.o) { sa = g.sb; sb = g.sa; } else return; if (sa > sb) w++; else if (sa < sb) l++; else tt++; });
+    let tw = 0, tl = 0, tn = 0; A.trades.forEach(x => { const o1 = owner(x.f1, x.yi, x.d), o2 = owner(x.f2, x.yi, x.d); if (!((o1 === a.o && o2 === b.o) || (o1 === b.o && o2 === a.o))) return; tn++; const fa = o1 === a.o ? x.f1 : x.f2; if (x.winner === fa) tw++; else if (x.winner) tl++; });
+    if (w + l + tt) add(`<b>${esc(sh(a.o))} is ${w}–${l}${tt ? '–' + tt : ''} against ${esc(sh(b.o))}</b> in this league.${tn ? ` They've made ${tn} trades together, ${esc(a.o.split(' ')[0])} winning ${tw} and losing ${tl}.` : ''}`, 'rivalries', 'rdet', () => { if (owner(a.f) === a.o && owner(b.f) === b.o) rpair = a.f + '-' + b.f; });
+    if (tn) add(`Every trade between ${esc(sh(a.o))} and ${esc(sh(b.o))}`, 'trades', 'tr-log', () => { tstate.pair = Math.min(a.f, b.f) + '-' + Math.max(a.f, b.f); tstate.f = ''; tstate.yi = ''; });
+  }
+  // champion of a season
+  if (yi >= 0 && /won|win|champ|title|final/.test(t)) { const c = A.champions[yi]; if (c && c.champ) add(`<b>${esc(owner(c.champ, yi))} won ${y}</b> with ${esc(team(c.champ, yi)[0])}${c.runner ? `, beating ${esc(owner(c.runner, yi))} in the final` : ''}.`, 'titles', 'ti-' + y); else if (c) add(`The ${y} title hasn't been decided yet.`, 'week', 'wk-odds'); }
+  // titles
+  if (/most (titles|championships|rings)|who has won the most|most chips/.test(t)) { const tr = trophy(); if (tr.length) { const top = tr[0][1].length; const lead = tr.filter(x => x[1].length === top); add(`<b>${lead.map(x => esc(x[0])).join(' and ')}</b> ${lead.length > 1 ? 'share' : 'has'} the most titles with ${top}${top ? ` (${lead.map(x => x[1].join(', ')).join('; ')})` : ''}.`, 'titles', 'ti-case'); } }
+  if (ppl.length === 1 && /title|champ|ring|won/.test(t) && yi < 0) { const p = ppl[0]; const ys = A.champions.filter(x => x.champ && owner(x.champ, x.yi) === p.o).map(x => x.y); const fl = A.champions.filter(x => x.runner && owner(x.runner, x.yi) === p.o).map(x => x.y); add(ys.length ? `<b>${esc(p.o)} has ${ys.length} title${ys.length > 1 ? 's' : ''}</b> (${ys.join(', ')})${fl.length ? ` and lost ${fl.length} final${fl.length > 1 ? 's' : ''}` : ''}.` : `<b>${esc(p.o)} hasn't won a title here yet</b>${fl.length ? `, though he reached the final in ${fl.join(', ')}` : ''}.`, 'titles', 'ti-case'); }
+  // trades
+  const fin = A.trades.filter(x => !x.open && x.winner);
+  if (/\bbest trade\b|biggest heist|heist|most lopsided|\bworst trade\b|robbery|fleece/.test(t) && ppl.length < 2) {
+    let pool = fin; if (ppl.length === 1) pool = fin.filter(x => [x.f1, x.f2].some(f => owner(f, x.yi, x.d) === ppl[0].o && (/worst/.test(t) ? x.winner !== f : x.winner === f)));
+    const h = [...pool].sort((a, b) => b.diff - a.diff)[0];
+    if (h) { const w = h.winner, lo = w === h.f1 ? h.f2 : h.f1; const gv = (w === h.f1 ? h.v1 : h.v2).filter(x => x.pid).sort((a, b) => b.pts - a.pts)[0]; add(`<b>${esc(short(w, h.yi, h.d))} over ${esc(short(lo, h.yi, h.d))}</b>, ${fmt(h.d)}: +${n1(A.toW(h.diff))} wins${gv ? `, led by ${esc(pname(gv.pid))}` : ''}.`, 't' + h.i); }
+  }
+  const traders = () => { const r = {}; A.trades.filter(x => x.p1 + x.p2 > 0).forEach(x => [[x.f1, x.p1 - x.p2], [x.f2, x.p2 - x.p1]].forEach(([f, d]) => { const o = owner(f, x.yi, x.d); r[o] = (r[o] || 0) + d; })); return Object.entries(r).sort((a, b) => b[1] - a[1]); };
+  if (/best trader|sharpest|trade king|wins the most trades|best at trading/.test(t)) { const r = traders()[0]; if (r) add(`<b>${esc(r[0])}</b> is the best trader here, +${n1(A.toW(r[1]))} wins on balance from his trades.`, 'trades', 'tr-card'); }
+  if (/worst trader|worst at trading|loses the most trades/.test(t)) { const rr = traders(); const r = rr[rr.length - 1]; if (r) add(`<b>${esc(r[0])}</b> has the worst trade balance, −${n1(Math.abs(A.toW(r[1])))} wins.`, 'trades', 'tr-card'); }
+  if (ppl.length === 1 && /trade|trades|trading|trader/.test(t) && !/best trade|worst trade|heist/.test(t)) { const p = ppl[0]; const r = traders().find(x => x[0] === p.o); if (r) add(`<b>${esc(p.o)}</b> is ${r[1] >= 0 ? '+' : '−'}${n1(Math.abs(A.toW(r[1])))} wins from trades.`, 'trades', 'tr-card'); add(`Every trade ${esc(sh(p.o))} has made`, 'trades', 'tr-log', () => { tstate.f = String(p.f); tstate.pair = ''; tstate.yi = ''; }); }
+  // drafting
+  const DR = A.draftReport;
+  if (DR && DR.owners && DR.owners.length) {
+    if (/best draft|best drafter|drafts best|best at drafting|draft king/.test(t)) { const o = DR.owners[0]; add(`<b>${esc(o.owner)}</b> is the best drafter, +${n0(o.voe)} value over what his slots usually return.`, 'picks', 'dr-card'); }
+    if (/worst draft|worst drafter|worst at drafting/.test(t)) { const o = DR.owners[DR.owners.length - 1]; add(`<b>${esc(o.owner)}</b> has the weakest draft record, ${o.voe >= 0 ? '+' : '−'}${n0(Math.abs(o.voe))} versus what his slots usually return.`, 'picks', 'dr-card'); }
+    if (ppl.length === 1 && /draft|drafting|drafter|rookie|picks/.test(t)) { const o = DR.owners.find(x => x.owner === ppl[0].o); if (o) add(`<b>${esc(o.owner)}</b> ranks ${ord(DR.owners.indexOf(o) + 1)} of ${DR.owners.length} as a drafter, ${o.voe >= 0 ? '+' : '−'}${n0(Math.abs(o.voe))} over slot across ${o.n} picks.${o.best ? ` Best pick: ${esc(pname(o.best.pid))}.` : ''}`, 'picks', 'dr-card'); }
+    if (/biggest bust|\bworst pick\b|bust/.test(t) && DR.busts && DR.busts[0]) { const b = DR.busts[0]; add(`Biggest bust: <b>${esc(pname(b.pid))}</b>, ${b.y} ${b.rd}.${String(b.pk).padStart(2, '0')} by ${esc(b.owner)}.`, 'picks', 'dr-hits'); }
+    if (/biggest steal|\bbest pick\b|steal/.test(t) && DR.steals && DR.steals[0]) { const b = DR.steals[0]; add(`Biggest steal: <b>${esc(pname(b.pid))}</b>, ${b.y} ${b.rd}.${String(b.pk).padStart(2, '0')} by ${esc(b.owner)}.`, 'picks', 'dr-hits'); }
+  }
+  // records
+  const R = A.records;
+  if (/highest (score|scoring)|most points in a week|best week|highest week/.test(t) && R.highWeek[0]) { const x = R.highWeek[0]; add(`<b>${n1(x.s)}</b> by ${esc(owner(x.f, x.yi))}, ${years[x.yi]} week ${x.w}, is the highest score ever.`, 'records', 'rec-highest-scoring-weeks'); }
+  if (/lowest (score|scoring)|fewest points|worst week/.test(t) && R.lowWeek[0]) { const x = R.lowWeek[0]; add(`<b>${n1(x.s)}</b> by ${esc(owner(x.f, x.yi))}, ${years[x.yi]} week ${x.w}, is the lowest score on record.`, 'records', 'rec-lowest-scoring-weeks'); }
+  if (/most points in a season|best season|highest season/.test(t) && R.seasonPF[0]) { const x = R.seasonPF[0]; add(`<b>${n1(x.pf)}</b> regular-season points by ${esc(owner(x.f, x.yi))} in ${years[x.yi]} is the record.`, 'records', 'rec-most-points-in-a-season'); }
+  if (/biggest blowout|largest margin/.test(t) && R.blowouts[0]) { const x = R.blowouts[0]; add(`<b>${n1(x.s - x.os)} points</b>: ${esc(owner(x.f, x.yi))} over ${esc(owner(x.opp, x.yi))}, ${years[x.yi]} week ${x.w}.`, 'records', 'rec-biggest-blowouts'); }
+  if (/closest game|closest win|smallest margin/.test(t) && R.closest[0]) { const x = R.closest[0]; add(`<b>${n1(x.s - x.os)} points</b>: ${esc(owner(x.f, x.yi))} over ${esc(owner(x.opp, x.yi))}, ${years[x.yi]} week ${x.w}.`, 'records', 'rec-closest-games'); }
+  if (/best player week|most points by a player|best single game/.test(t) && R.playerWeeks[0]) { const x = R.playerWeeks[0]; add(`<b>${esc(pname(x.pid))}, ${n1(x.s)}</b> for ${esc(owner(x.f, x.yi))} in ${years[x.yi]} week ${x.w}.`, 'records', 'rec-best-player-weeks'); }
+  // waivers
+  if (/biggest (faab|bid)|most faab|most expensive (pickup|claim)|highest bid/.test(t) && A.bigBids && A.bigBids[0]) { const b = A.bigBids[0]; add(`<b>${money(A.bid(b))}</b> on ${esc(pname(b.pid))} by ${esc(owner(b.fid, b.sy))} in ${years[b.sy]} is the biggest bid ever.`, 'waivers'); }
+  if (/best (waiver|pickup)|best free agent/.test(t) && A.bestPickups && A.bestPickups[0]) { const b = A.bestPickups[0]; add(`Best pickup ever: <b>${esc(pname(b.pid))}</b> by ${esc(owner(b.fid, b.sy))} in ${years[b.sy]}, ${n0(b.pts)} started points.`, 'waivers'); }
+  // this season
+  let K = null; try { K = wkData(); } catch (e) {}
+  if (K) {
+    if (/favorite|who will win|title odds|odds to win/.test(t) && K.odds) { const fav = Object.entries(K.odds).sort((a, b) => b[1].title - a[1].title)[0]; if (fav) add(`<b>${esc(owner(+fav[0]))}</b> is the title favorite at ${Math.round(fav[1].title * 100)}%.`, 'week', 'wk-odds'); }
+    if (/luckiest|most lucky/.test(t) && K.power) { const x = [...K.power].sort((a, b) => b.luck - a.luck)[0]; if (x) add(`<b>${esc(owner(x.f))}</b> is the luckiest team this season, ${x.luck >= 0 ? '+' : ''}${x.luck} wins against his all-play record.`, 'week', 'wk-luck'); }
+    if (/unluckiest|least lucky|most unlucky/.test(t) && K.power) { const x = [...K.power].sort((a, b) => a.luck - b.luck)[0]; if (x) add(`<b>${esc(owner(x.f))}</b> is the unluckiest team this season, ${x.luck < 0 ? '−' + Math.abs(x.luck) : x.luck} wins against his all-play record.`, 'week', 'wk-luck'); }
+    if (/power rank|best team|who is the best/.test(t) && K.power) { const x = [...K.power].sort((a, b) => a.rank - b.rank)[0]; if (x) add(`<b>${esc(owner(x.f))}</b> is No. 1 in the power rankings.`, 'week', 'wk-power'); }
+    if (ppl.length === 1 && /odds|playoff|make it|chance/.test(t) && K.odds) { const p = ppl[0]; const o = K.odds[p.f]; if (o && owner(p.f) === p.o) add(`<b>${esc(p.o)}</b> has a ${Math.round(o.po * 100)}% chance to make the playoffs and ${Math.round(o.title * 100)}% to win it all.`, 'week', 'wk-odds'); }
+  }
+  // one person, nothing more specific: their franchise page
+  if (ppl.length === 1 && !out.length) { const p = ppl[0]; const fr = A.franchises.find(x => x.f === p.f); const cur = owner(p.f) === p.o; add(`<b>${esc(p.o)}</b>${cur ? `, ${esc(curTeam(p.f))}` : `, ran this franchise ${p.ys.map(k => years[k]).filter((v, i, a) => i === 0 || i === a.length - 1).join('–')}`}${fr && cur ? `. All-time ${rec(fr.w, fr.l, fr.t)}${fr.titles.length ? `, champion in ${fr.titles.join(', ')}` : ''}` : ''}.`, 'f' + p.f); }
+  return out.slice(0, 3);
+}
+function searchAll(raw0) {
+  const t = raw0.trim().toLowerCase(); if (t.length < 2) return [];
+  const res = answers(t).map(a => ({ ...a }));
+  const words = t.replace(/[?!.]/g, '').split(/\s+/).filter(w => w.length > 1 && !['the', 'who', 'what', 'has', 'have', 'is', 'was', 'of', 'in', 'a', 'an', 'to', 'for', 'and', 'ever', 'most', 'best', 'worst', 'does', 'did', 'my', 'me', 'show', 'how', 'many'].includes(w));
+  // owners
+  findPeople(t).slice(0, 2).forEach(p => { if (!res.some(r => r.hash === 'f' + p.f && r.t === 'f')) res.push({ t: 'f', f: p.f, n: p.o, sub: owner(p.f) === p.o ? curTeam(p.f) : 'former owner' }); });
+  // players
+  if (words.length) { const pw = index.filter(x => words.every(w => x.k.includes(w)) || (words.length > 1 && x.k.includes(words.join(' ')))).sort((a, b) => (b.k.startsWith(t) - a.k.startsWith(t)) || (S(b.id).length - S(a.id).length)).slice(0, res.length ? 4 : 8); pw.forEach(x => res.push({ t: 'p', id: x.id, n: x.n, sub: `${x.pos} · ${x.nfl}` })); }
+  // sections
+  const sec = SECTIONS.map(x => { const k = (x[0] + ' ' + x[3]).toLowerCase(); const sc = words.filter(w => k.includes(w)).length + (k.includes(t) ? 3 : 0); return [x, sc]; }).filter(x => x[1] > 0).sort((a, b) => b[1] - a[1]).slice(0, 3);
+  sec.forEach(([x]) => res.push({ t: 's', n: x[0], sub: SUBL[x[1]] || x[1][0].toUpperCase() + x[1].slice(1), hash: x[1], anchor: x[2] }));
+  // a season on its own
+  const y = nT(t); if (y && years.includes(y) && !res.some(r => r.anchor === 'ti-' + y)) res.push({ t: 's', n: `${y} season`, sub: 'Title card', hash: 'titles', anchor: 'ti-' + y });
+  return res.slice(0, 12);
+}
+function draw() {
+  ul.hidden = !hits.length;
+  ul.innerHTML = hits.map((h, i) => { const a = `role="option" aria-selected="${i === sel}" data-i="${i}"`;
+    if (h.t === 'ans') return `<li ${a} class="ans" style="display:block;border-left:3px solid var(--accent);background:var(--soft)"><div style="font-size:14px;line-height:1.4">${h.html}</div><small style="display:block;margin-top:3px">Go there →</small></li>`;
+    const tag = h.t === 'p' ? 'Player' : h.t === 'f' ? 'Owner' : 'Section';
+    return `<li ${a}><span>${esc(h.n)}</span><small>${esc(tag)} · ${esc(h.sub || '')}</small></li>`; }).join('');
+}
+q.addEventListener('input', () => { sel = -1; hits = searchAll(q.value); draw(); });
 q.addEventListener('keydown', e => {
   if (e.key === 'ArrowDown' && hits.length) { sel = (sel + 1) % hits.length; draw(); e.preventDefault(); }
   else if (e.key === 'ArrowUp' && hits.length) { sel = (sel - 1 + hits.length) % hits.length; draw(); e.preventDefault(); }
-  else if (e.key === 'Enter') { const h = hits[sel < 0 ? 0 : sel]; if (h) pick(h.id); }
+  else if (e.key === 'Enter') { const h = hits[sel < 0 ? 0 : sel]; if (h) pick(h); }
   else if (e.key === 'Escape') { hits = []; draw(); }
 });
-function pick(id) { hits = []; draw(); q.value = ''; q.blur(); go('p' + id); }
-ul.addEventListener('mousedown', e => { const li = e.target.closest('li'); if (li) { e.preventDefault(); pick(li.dataset.p); } });
+function pick(h) {
+  hits = []; draw(); q.value = ''; q.blur();
+  if (h.t === 'p') return go('p' + h.id);
+  if (h.t === 'f') return go('f' + h.f);
+  if (h.prep) h.prep();
+  go(h.hash);
+  if (h.anchor) { let n = 0; const tryScroll = () => { const el = document.getElementById(h.anchor); if (el) { const det = el.closest('details'); if (det) det.open = true; el.scrollIntoView({ block: 'start' }); } else if (n++ < 10) setTimeout(tryScroll, 60); }; setTimeout(tryScroll, 40); }
+}
+ul.addEventListener('mousedown', e => { const li = e.target.closest('li'); if (li) { e.preventDefault(); const h = hits[+li.dataset.i]; if (h) pick(h); } });
 document.addEventListener('click', e => { if (!combo.contains(e.target)) { hits = []; draw(); } });
 
 route();
