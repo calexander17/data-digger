@@ -1,0 +1,21 @@
+{
+ "name": "bush league all stars Data Digger",
+ "short_name": "Bush League",
+ "start_url": "./",
+ "scope": "./",
+ "display": "standalone",
+ "background_color": "#1d3b1f",
+ "theme_color": "#1d3b1f",
+ "icons": [
+  {
+   "src": "icon-192.png",
+   "sizes": "192x192",
+   "type": "image/png"
+  },
+  {
+   "src": "icon-512.png",
+   "sizes": "512x512",
+   "type": "image/png"
+  }
+ ]
+}
