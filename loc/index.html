@@ -166,6 +166,8 @@ select{max-width:100%}
 }
 @media (max-width:560px){
   .onlym{display:block}
+  .hm-i{display:none}
+  .onlyg{display:grid;gap:2px}
   table.ledger thead{display:none}
   table.ledger,table.ledger tbody{display:block}
   table.ledger tr{display:grid;grid-template-columns:4.6em minmax(0,1fr) auto;column-gap:10px;padding:12px 14px;border-bottom:1px solid var(--rule);border-left:6px solid var(--fcol)}
@@ -174,6 +176,11 @@ select{max-width:100%}
   table.ledger td.hm{display:none}
   table.ledger td:last-child{grid-column:1/-1;margin-top:8px;padding-top:8px;border-top:1px dashed var(--rule);display:grid;grid-template-columns:1fr 1fr;gap:12px}
 }
+.tr-cal{display:grid;grid-template-columns:repeat(12,minmax(0,1fr));gap:6px;align-items:end;height:170px;margin-top:12px}
+.tr-m{display:flex;flex-direction:column;justify-content:flex-end;align-items:center;gap:4px;height:100%;font:600 11px var(--cond);color:var(--muted)}
+.tr-m i{display:block;width:100%;max-width:34px;background:color-mix(in srgb, var(--accent) 45%, var(--soft));border-radius:4px 4px 0 0}
+.tr-m .num{color:var(--ink)}
+.mc[data-fx][aria-pressed="true"]{outline:2px solid var(--ink);outline-offset:1px}
 .facts{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,210px),1fr));gap:12px}
 .fact{padding:14px 16px;border-left:4px solid var(--accent);background:var(--card);border-radius:0 8px 8px 0}
 .fact .sub{margin-top:6px}
@@ -1115,6 +1122,94 @@ function treeHTML(i, depth, seen) {
   }
   return parts.join('') || '<div class="owner">No players changed hands, so there is nothing to follow.</div>';
 }
+/* ---------- TRADE ROOM ---------- */
+const trs = { sort: 'net', cell: null };
+function tradeRoom() {
+  const T = A.trades.filter(t => (t.p1 + t.p2) > 0);
+  if (T.length < 10) return '';
+  const sg = x => (x > 0 ? '+' : x < 0 ? '−' : '') + n0(Math.abs(x));
+  const col = x => x > 0.5 ? 'var(--win)' : x < -0.5 ? 'var(--loss)' : 'inherit';
+  const who = {}, rep = {};
+  const side = (t, me) => me === t.f1 ? [t.p1, t.p2, t.f2] : [t.p2, t.p1, t.f1];
+  T.forEach(t => [t.f1, t.f2].forEach(f => {
+    const o = owner(f, t.yi); const [mine, theirs, of] = side(t, f); const oo = owner(of, t.yi);
+    const r = who[o] = who[o] || { o, f, yi: t.yi, n: 0, w: 0, l: 0, net: 0, best: null, worst: null, seasons: {}, vs: {} };
+    if (t.yi >= r.yi) { r.f = f; r.yi = t.yi; }
+    r.n++; const d = mine - theirs; r.net += d; if (t.winner === f) r.w++; else if (t.winner) r.l++;
+    if (!r.best || d > r.best.d) r.best = { t, d }; if (!r.worst || d < r.worst.d) r.worst = { t, d };
+    r.seasons[t.yi] = (r.seasons[t.yi] || 0) + d;
+    const v = r.vs[oo] = r.vs[oo] || { n: 0, net: 0, w: 0, l: 0 }; v.n++; v.net += d; if (t.winner === f) v.w++; else if (t.winner) v.l++;
+    rep[o] = [f, t.yi];
+  }));
+  const O = Object.values(who).filter(r => r.n >= 3);
+  const ON = (o) => { const [f, yi] = rep[o]; return `<span class="fdot" style="--fcol:${fcol(f)}"></span><button class="flink" data-f="${f}">${esc(o)}</button>`; };
+  const OS = (o) => { const [f] = rep[o]; const p = o.split(' '); return `<span class="fdot" style="--fcol:${fcol(f)}"></span>${esc(p.length > 1 ? p[0] + ' ' + p[p.length - 1][0] + '.' : o)}`; };
+  const sorted = [...O].sort((a, b) => trs.sort === 'rate' ? ((b.w / Math.max(1, b.w + b.l)) - (a.w / Math.max(1, a.w + a.l))) : trs.sort === 'n' ? b.n - a.n : trs.sort === 'avg' ? (b.net / b.n) - (a.net / a.n) : b.net - a.net);
+  const maxN = Math.max(1, ...O.map(r => Math.abs(r.net)));
+  const bar = v => { const w = Math.abs(v) / maxN * 50; return `<span class="dr-track" style="width:110px"><i class="dr-mid"></i><i class="dr-bar" style="${v >= 0 ? 'left:50%' : `left:${50 - w}%`};width:${w}%;background:${v >= 0 ? 'var(--win)' : 'var(--loss)'}"></i></span>`; };
+  const tl = (x) => `<button class="tlink" data-t="${x.t.i}">${yr(x.t.yi)}</button>`;
+  const card = `<section class="card" id="tr-card"><div class="pad"><h3>Trade report card</h3><p class="sub">Every trade each owner made, scored by started points: what he got minus what he gave up. A plus means he has come out ahead on balance.</p>
+    <div class="controls" style="margin-top:8px"><label for="trsort">Sort by<select id="trsort">${[['net', 'Net points'], ['avg', 'Per trade'], ['rate', 'Win rate'], ['n', 'Most trades']].map(([k, t]) => `<option value="${k}"${trs.sort === k ? ' selected' : ''}>${t}</option>`).join('')}</select></label></div></div>
+    <div class="tbl"><table><thead><tr><th class="num">#</th><th>Owner</th><th class="num hm">Trades</th><th class="num hm">Won–lost</th><th>Net points</th><th class="num hm">Per trade</th><th class="hm">Best heist</th></tr></thead><tbody>${sorted.map((r, i) => `<tr><td class="num"><b>${i + 1}</b></td><td>${ON(r.o)}<div class="onlym owner">${r.n} trades, ${r.w}–${r.l}</div></td><td class="num hm">${r.n}</td><td class="num hm">${r.w}–${r.l}</td><td style="white-space:nowrap"><span class="hm-i">${bar(r.net)}</span> <b style="color:${col(r.net)}">${sg(r.net)}</b></td><td class="num hm" style="color:${col(r.net / r.n)}">${sg(r.net / r.n)}</td><td class="hm">${r.best && r.best.d > 0 ? `<span style="color:var(--win)">${sg(r.best.d)}</span> <span class="owner">vs ${esc((t => owner(owner(t.f1, t.yi) === r.o ? t.f2 : t.f1, t.yi))(r.best.t))}, ${tl(r.best)}</span>` : '–'}</td></tr>`).join('')}</tbody></table></div></section>`;
+  // who fleeced whom: owner x owner net points
+  const names = [...O].sort((a, b) => b.net - a.net).map(r => r.o);
+  const maxV = Math.max(1, ...O.flatMap(r => Object.values(r.vs).map(v => Math.abs(v.net))));
+  const fl = `<section class="card pad" id="tr-fleece"><h3>Who fleeced whom</h3><p class="sub">Net started points the row owner has taken from the column owner across all their trades. Green means the row owner is winning the relationship. Tap a square for the details.</p>
+    <div class="tbl" style="margin-top:10px"><table class="matrix"><thead><tr><th></th>${names.map(o => `<th style="vertical-align:bottom"><div class="colh">${esc(o.split(' ')[0])}</div><div class="colbar" style="background:${fcol(rep[o][0])}"></div></th>`).join('')}</tr></thead><tbody>${names.map(a => `<tr><th class="rowh">${OS(a)}</th>${names.map(b => { if (a === b) return '<td><span class="mc self"></span></td>'; const v = who[a].vs[b]; if (!v) return '<td><span class="mc" style="opacity:.35">·</span></td>'; const al = Math.min(85, Math.round(Math.abs(v.net) / maxV * 100) + 10); return `<td><button class="mc" data-fx="${esc(a)}|${esc(b)}" style="background:color-mix(in srgb, ${v.net >= 0 ? 'var(--win)' : 'var(--loss)'} ${al}%, var(--soft));${al > 55 ? 'color:#fff;' : ''}">${v.net >= 0 ? '+' : '−'}${Math.abs(v.net) >= 1000 ? (Math.abs(v.net) / 1000).toFixed(1) + 'k' : n0(Math.abs(v.net))}<small>${v.n}</small></button></td>`; }).join('')}</tr>`).join('')}</tbody></table></div><p class="sub" id="fxdet" style="min-height:1.5em;margin-top:8px"></p></section>`;
+  // heists
+  const heists = [...T].filter(t => !t.open && t.winner).sort((a, b) => b.diff - a.diff).slice(0, 8);
+  const loserOf = t => t.winner === t.f1 ? t.f2 : t.f1;
+  const hl = heists.map((t, i) => `<li><span><span class="rk">${i + 1}</span> ${FS(t.winner, t.yi)} fleeced ${FS(loserOf(t), t.yi)} <span class="owner">${fmt(t.d)}</span> <button class="tlink" data-t="${t.i}">See it</button></span><span class="v" style="color:var(--win)">${sg(t.diff)}</span></li>`).join('');
+  const byYear = years.map((y, yi) => [y, [...T].filter(t => t.yi === yi && t.winner).sort((a, b) => b.diff - a.diff)[0]]).filter(x => x[1]);
+  const toy = byYear.reverse().map(([y, t]) => `<li><span><span class="rk">${y}</span> ${FS(t.winner, t.yi)} over ${FS(loserOf(t), t.yi)} ${t.open ? '<span class="tag">Still playing out</span>' : ''} <button class="tlink" data-t="${t.i}">See it</button></span><span class="v" style="color:var(--win)">${sg(t.diff)}</span></li>`).join('');
+  // marks and nemeses
+  const marks = O.map(r => { const v = Object.entries(r.vs).filter(([, x]) => x.n >= 3); if (!v.length) return null; const best = v.sort((a, b) => b[1].net - a[1].net)[0], worst = [...v].sort((a, b) => a[1].net - b[1].net)[0]; return { r, best, worst }; }).filter(Boolean).sort((a, b) => b.r.net - a.r.net);
+  const mk = `<section class="card" id="tr-marks"><div class="pad"><h3>Favorite marks and nemeses</h3><p class="sub">For every owner, the trade partner he has taken the most from and the one who has taken the most from him. At least three trades together.</p></div><div class="tbl"><table><thead><tr><th>Owner</th><th class="hm">Favorite mark</th><th class="hm">Nemesis</th></tr></thead><tbody>${marks.map(m => { const mkH = m.best[1].net > 0 ? `${OS(m.best[0])} <span style="color:var(--win)">${sg(m.best[1].net)}</span> <span class="owner">in ${m.best[1].n}</span>` : '<span class="owner">nobody yet</span>'; const nmH = m.worst[1].net < 0 ? `${OS(m.worst[0])} <span style="color:var(--loss)">${sg(m.worst[1].net)}</span> <span class="owner">in ${m.worst[1].n}</span>` : '<span class="owner">nobody yet</span>'; return `<tr><td>${ON(m.r.o)}<div class="onlym onlyg" style="margin-top:4px"><span><span class="eyebrow">Mark</span> ${mkH}</span><span><span class="eyebrow">Nemesis</span> ${nmH}</span></div></td><td class="hm">${m.best[1].net > 0 ? `${OS(m.best[0])} <span style="color:var(--win)">${sg(m.best[1].net)}</span> <span class="owner">in ${m.best[1].n}</span>` : '<span class="owner">nobody yet</span>'}</td><td class="hm">${m.worst[1].net < 0 ? `${OS(m.worst[0])} <span style="color:var(--loss)">${sg(m.worst[1].net)}</span> <span class="owner">in ${m.worst[1].n}</span>` : '<span class="owner">nobody yet</span>'}</td></tr>`; }).join('')}</tbody></table></div></section>`;
+  // season grid
+  const sg2 = `<section class="card pad" id="tr-seasons"><h3>Every owner, every season</h3><p class="sub">Net trade points by the season the trades were made. Recent seasons are still filling in.</p><div class="tbl" style="margin-top:8px"><table class="dr-g"><thead><tr><th>Owner</th>${years.map(y => `<th class="num">'${String(y).slice(2)}</th>`).join('')}<th class="num">Total</th></tr></thead><tbody>${names.map(o => `<tr><td style="white-space:nowrap">${OS(o)}</td>${years.map((_, yi) => { const v = who[o].seasons[yi]; if (v == null) return '<td></td>'; const a = Math.min(80, Math.round(Math.abs(v) / 8)); return `<td class="dr-cell" style="cursor:default;background:color-mix(in srgb, ${v >= 0 ? 'var(--win)' : 'var(--loss)'} ${a}%, transparent);${a > 45 ? 'color:#fff;' : ''}">${sg(v)}</td>`; }).join('')}<td class="num"><b style="color:${col(who[o].net)}">${sg(who[o].net)}</b></td></tr>`).join('')}</tbody></table></div></section>`;
+  // calendar
+  const mon = Array(12).fill(0); const dayCount = {};
+  A.trades.forEach(t => { const dt = L.dayToDate ? L.dayToDate(t.d) : new Date(Date.UTC(2018, 0, 1) + t.d * 864e5); mon[dt.getUTCMonth()]++; const k = t.d; dayCount[k] = (dayCount[k] || 0) + 1; });
+  const mN = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']; const mx = Math.max(...mon);
+  const peak = mon.indexOf(mx);
+  const cal = `<section class="card pad" id="tr-cal"><h3>When the deals happen</h3><p class="sub">Every trade since ${years[0]}, by month.</p><div class="tr-cal">${mon.map((c, i) => `<div class="tr-m"><span class="num">${c}</span><i style="height:${Math.max(2, c / mx * 100)}%;${i === peak ? 'background:var(--accent)' : ''}"></i><span>${mN[i]}</span></div>`).join('')}</div></section>`;
+  // facts
+  const busiestDay = Object.entries(dayCount).sort((a, b) => b[1] - a[1])[0];
+  const block = [...A.trades].sort((a, b) => (b.g1.length + b.g2.length) - (a.g1.length + a.g2.length))[0];
+  const qual = O.filter(r => r.w + r.l >= 15); const shark = [...qual].sort((a, b) => (b.w / (b.w + b.l)) - (a.w / (a.w + a.l)))[0], fish = [...qual].sort((a, b) => (a.w / (a.w + a.l)) - (b.w / (b.w + b.l)))[0];
+  const pairs = {}; T.forEach(t => { const a = owner(t.f1, t.yi), b = owner(t.f2, t.yi); const k = [a, b].sort().join('|'); const pr = pairs[k] = pairs[k] || { n: 0, net: 0, a: [a, b].sort()[0] }; pr.n++; pr.net += (a === pr.a ? t.p1 - t.p2 : t.p2 - t.p1); });
+  const even = Object.entries(pairs).filter(([, v]) => v.n >= 8).sort((a, b) => Math.abs(a[1].net) / a[1].n - Math.abs(b[1].net) / b[1].n)[0];
+  const lopsided = Object.entries(pairs).filter(([, v]) => v.n >= 5).sort((a, b) => Math.abs(b[1].net) - Math.abs(a[1].net))[0];
+  const fsup = (eb, html) => `<div class="fact"><div class="eyebrow">${eb}</div><div>${html}</div></div>`;
+  const fmtD = d => { const dt = L.dayToDate ? L.dayToDate(+d) : new Date(Date.UTC(2018, 0, 1) + d * 864e5); return dt.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' }); };
+  const facts = `<div class="facts">${[
+    shark ? fsup('Sharpest trader', `${ON(shark.o)} has won <b>${Math.round(shark.w / (shark.w + shark.l) * 100)}%</b> of his decided trades, ${shark.w}–${shark.l}.`) : '',
+    fish && fish !== shark ? fsup('Most generous trader', `${ON(fish.o)} has won just <b>${Math.round(fish.w / (fish.w + fish.l) * 100)}%</b> of his decided trades, ${fish.w}–${fish.l}.`) : '',
+    lopsided ? (() => { const [k, v] = lopsided; const [a, b] = k.split('|'); const w = v.net >= 0 ? a : b, l = v.net >= 0 ? b : a; return fsup('Most one-sided relationship', `${ON(w)} is up <b>${n0(Math.abs(v.net))}</b> points on ${ON(l)} across ${v.n} trades.`); })() : '',
+    even ? (() => { const [k, v] = even; const [a, b] = k.split('|'); return fsup('Fairest dealers', `${ON(a)} and ${ON(b)} have made ${v.n} trades and are within <b>${n0(Math.abs(v.net))}</b> points of each other.`); })() : '',
+    block ? fsup('Biggest blockbuster', `${block.g1.length + block.g2.length} assets changed hands when ${FS(block.f1, block.yi)} and ${FS(block.f2, block.yi)} made a deal in ${yr(block.yi)}. <button class="tlink" data-t="${block.i}">See it</button>`) : '',
+    busiestDay && busiestDay[1] > 2 ? fsup('Busiest day', `<b>${busiestDay[1]} trades</b> went through on ${fmtD(busiestDay[0])}.`) : '',
+    fsup('Deadline season', `<b>${mN[peak]}</b> is the busiest month, with ${mx} of the league's ${A.trades.length} trades.`),
+  ].join('')}</div>`;
+  const nav = `<div class="pills jump">${[['tr-card', 'Report card'], ['tr-fleece', 'Who fleeced whom'], ['tr-heists', 'Heists'], ['tr-marks', 'Marks and nemeses'], ['tr-seasons', 'By season'], ['tr-cal', 'Calendar'], ['tr-log', 'Trade log']].map(([id, t]) => `<a class="pill" href="#${id}" data-jump="${id}">${t}</a>`).join('')}</div>`;
+  return `<section><h2 class="sec">The trade room</h2><p class="lede">${A.trades.length} trades since ${years[0]}, and who got the better of whom. Everything is scored in started points: what each side's new players scored for them.</p></section>${nav}
+    ${card}${facts}<div class="grid2">${fl}<section class="card pad" id="tr-heists"><h3>Biggest heists</h3><p class="sub">The most lopsided finished trades ever.</p><ol class="list">${hl}</ol><h3 style="margin-top:18px">Heist of the year</h3><p class="sub">The most lopsided trade made each season.</p><ol class="list">${toy}</ol></section></div>
+    ${mk}${sg2}${cal}`;
+}
+function wireTradeRoom() {
+  const sel = $('#trsort'); if (sel) sel.onchange = e => { trs.sort = e.target.value; const y = scrollY; viewTrades(); scrollTo(0, y); };
+  const det = document.getElementById('fxdet');
+  main.querySelectorAll('[data-fx]').forEach(b => b.onclick = () => {
+    const [a, o] = b.dataset.fx.split('|');
+    const ts = A.trades.filter(t => (t.p1 + t.p2) > 0 && ((owner(t.f1, t.yi) === a && owner(t.f2, t.yi) === o) || (owner(t.f2, t.yi) === a && owner(t.f1, t.yi) === o)));
+    let net = 0, w = 0, l = 0; ts.forEach(t => { const f = owner(t.f1, t.yi) === a ? t.f1 : t.f2; const d = f === t.f1 ? t.p1 - t.p2 : t.p2 - t.p1; net += d; if (t.winner === f) w++; else if (t.winner) l++; });
+    const best = [...ts].sort((x, y) => y.diff - x.diff)[0];
+    main.querySelectorAll('[data-fx][aria-pressed="true"]').forEach(x => x.setAttribute('aria-pressed', 'false')); b.setAttribute('aria-pressed', 'true');
+    det.innerHTML = `<b>${esc(a)} vs ${esc(o)}:</b> ${ts.length} trades, ${esc(a.split(' ')[0])} won ${w} and lost ${l}, net ${net >= 0 ? '+' : '−'}${n0(Math.abs(net))} points.${best ? ` Biggest swing: <button class="tlink" data-t="${best.i}">${yr(best.yi)}, ${n0(best.diff)} points</button>.` : ''}`;
+  });
+  main.querySelectorAll('[data-jump]').forEach(a => a.onclick = e => { e.preventDefault(); const el = document.getElementById(a.dataset.jump); if (el) el.scrollIntoView({ behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'start' }); });
+}
+
 function viewTrades(focus) {
   let list = [...A.trades];
   if (focus != null) { const t = A.trades[focus]; tstate.pair = Math.min(t.f1, t.f2) + '-' + Math.max(t.f1, t.f2); tstate.yi = ''; tstate.f = ''; }
@@ -1142,7 +1237,7 @@ function viewTrades(focus) {
   if (focus != null) { const ix = list.findIndex(t => t.i === focus); if (ix >= tstate.n) tstate.n = ix + 1; }
   const shown = list.slice(0, tstate.n);
   const pairLabel = tstate.pair ? (() => { const [a, b] = tstate.pair.split('-').map(Number); return `<span class="tag cur">${esc(short(a))} × ${esc(short(b))}</span> <button class="btn" id="clrpair">Clear pair</button>`; })() : '';
-  main.innerHTML = `<section><h2 class="sec">Trade log</h2><p class="lede">Every completed trade since ${years[0]}, graded by the started points each side got out of it. An asterisk means the value is still growing.</p><details class="lk-how" style="margin-top:8px"><summary>How trades are graded</summary><p class="sub" style="font-size:14px;max-width:68ch">Players count the started points they scored for the team that traded for them. A pick the team used counts what the player it drafted scored for them. A pick the team traded away again counts its draft slot's value: what a player taken at that slot has typically given the team that drafted him in this league, from a 1.01 down to the last pick. Undrafted or unmatched picks count their round's average. Each pick shows the path it took to the player it became. <a href="#picks">How pick values work</a>.</p></details></p></section>
+  main.innerHTML = (focus == null ? tradeRoom() : '') + `<section id="tr-log"><h2 class="sec">Trade log</h2><p class="lede">Every completed trade since ${years[0]}, graded by the started points each side got out of it. An asterisk means the value is still growing.</p><details class="lk-how" style="margin-top:8px"><summary>How trades are graded</summary><p class="sub" style="font-size:14px;max-width:68ch">Players count the started points they scored for the team that traded for them. A pick the team used counts what the player it drafted scored for them. A pick the team traded away again counts its draft slot's value: what a player taken at that slot has typically given the team that drafted him in this league, from a 1.01 down to the last pick. Undrafted or unmatched picks count their round's average. Each pick shows the path it took to the player it became. <a href="#picks">How pick values work</a>.</p></details></p></section>
   <div class="grid2 tr-side">
     <section class="card pad"><h3>Who trades with whom</h3><p class="sub">Number of trades between each pair of franchises, labeled by current owner. Tap a square to see those trades.</p><div class="tbl" style="margin-top:10px">${mx}</div></section>
     <section class="card pad"><h3>Trade volume by season</h3><div class="bars" style="margin-top:10px">${years.map((y, yi) => { const c = A.trades.filter(t => t.yi === yi).length; const m = Math.max(...years.map((_, k) => A.trades.filter(t => t.yi === k).length)); return `<div class="bar"><span>${y}</span><span class="t"><i style="width:${c / m * 100}%"></i></span><span class="num">${c}</span></div>`; }).join('')}</div>
@@ -1162,7 +1257,7 @@ function viewTrades(focus) {
   if ($('#tmore')) $('#tmore').onclick = () => { tstate.n += 25; viewTrades(); };
   if ($('#clrpair')) $('#clrpair').onclick = () => { tstate.pair = ''; viewTrades(); };
   main.querySelectorAll('[data-pair]').forEach(b => b.onclick = () => { tstate.pair = tstate.pair === b.dataset.pair ? '' : b.dataset.pair; tstate.n = 25; viewTrades(); });
-  wireTrees();
+  wireTrees(); wireTradeRoom();
   if (focus != null) { const el = document.getElementById('tr' + focus); if (el) el.scrollIntoView({ block: 'center' }); }
 }
 function wireTrees() {
