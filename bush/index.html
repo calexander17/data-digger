@@ -1115,7 +1115,7 @@ const FN = (f, yi = last, d) => `<span class="fdot" style="--fcol:${fcol(f)}"></
 const ownersOf = f => { const o = []; years.forEach((_, k) => { const n = owner(f, k); if (n && !o.includes(n) && !o.some(x => x.startsWith(n + ' ') || n.startsWith(x + ' '))) o.push(n); }); return o; };
 // all owners of a franchise, current first (for all-time views of a team that changed hands)
 const shortOf = n => { const o = String(n || '').split(' ').filter((x, i) => i === 0 || !/^["“(']/.test(x)); return o.length > 1 ? `${o[0]} ${o[o.length - 1][0]}.` : o[0]; };
-const ownersCurFirst = f => { const o = ownersOf(f); const c = owner(f); return [c, ...o.filter(x => x !== c)]; };
+const ownersCurFirst = f => { const o = ownersOf(f); const c = owner(f); const ppl = n => ((raw.co || {})[n] || [n]); const seen = new Set(ppl(c)); return [c, ...o.filter(x => { if (x === c) return false; const p = ppl(x); if (p.every(q => seen.has(q))) return false; p.forEach(q => seen.add(q)); return true; })]; };
 const shortH = f => ownersCurFirst(f).map(shortOf).join(' / ');
 const FSH = f => `<span class="fdot" style="--fcol:${fcol(f)}"></span><button class="flink" data-f="${f}">${esc(shortH(f))}</button>`;
 const FLH = f => `<span class="fdot" style="--fcol:${fcol(f)}"></span><button class="flink team" data-f="${f}">${esc(team(f, last)[0])}</button> <span class="owner">${esc(ownersCurFirst(f).join(' / '))}</span>`;
