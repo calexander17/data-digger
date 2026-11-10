@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
 """Builds the GitHub Pages mirror of the Data Digger pages.
-Usage: python3 tools/mksite.py <repo dir> loc=<path to league-ledger.html> titan=<path to titan.html> flex=<path to flex-luger.html>
+Usage: python3 tools/mksite.py <repo dir> loc=<path to league-ledger.html> titan=<path to titan.html> flex=<path to flex-luger.html> sunday=<path to sunday-funday.html>
 Leagues not given keep their current page. Icons already in each league folder are reused."""
 import sys, os, re, json
 from PIL import Image
 repo = sys.argv[1]; pages = dict(a.split('=', 1) for a in sys.argv[2:])
 L = [('loc', 'League of Champions', 'LoC', 'WTZJGmufRPd1RruVQu4ByT', '#0a1328'),
      ('titan', 'League of Titans', 'Titans', 'PWjJ2KP8RePM6nPUWGuvHf', '#1e060b'),
-     ('flex', 'Flex Luger', 'Flex Luger', 'R7cj6ms1gn4vt9cyqJw6RD', '#0a2f4d')]
+     ('flex', 'Flex Luger', 'Flex Luger', 'R7cj6ms1gn4vt9cyqJw6RD', '#0a2f4d'),
+     ('sunday', 'Sunday Funday', 'Sunday', 'KD4S6bUavosUigMXTsuPup', '#ff4f6a')]
 for key, name, shortname, aid, theme in L:
     d = os.path.join(repo, key); os.makedirs(d, exist_ok=True)
     src = os.path.join(d, 'icon-512.png')
