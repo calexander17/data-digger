@@ -850,8 +850,13 @@ function weekly(raw, L, A) {
   // previews for next week
   const preview = nextW <= lrw ? sched.filter(x => x[0] === nextW).map(([w, a, b]) => {
     const ma = mean(a), mb = mean(b); const z = (ma - mb) / (sd * Math.SQRT2); const pa = 0.5 * (1 + erf(z));
-    const h = A.h2h[a + '-' + b]; const lastG = h ? [...h.games].sort((x, y) => y.yi - x.yi || y.w - x.w)[0] : null;
-    return { w, a, b, pa: ma, pb: mb, winA: pa, h2h: h ? [h.w, h.l, h.t] : [0, 0, 0], last: lastG, poA: h ? h.games.filter(x => x.kind === 'playoff').length : 0, stakes: odds ? [odds[a].ifW, odds[a].ifL, odds[b].ifW, odds[b].ifL] : null };
+    // series between these two owners only: games from seasons when someone else ran either team don't count
+    const ownY = (f, yi) => { try { if (L.ownerAt) { const o = L.ownerAt(f, yi); if (o) return o; } } catch (e) {} const r = raw.fr[years[yi]] && raw.fr[years[yi]][f - 1]; return r ? r[1] : ''; };
+    const oa = ownY(a, last), ob = ownY(b, last);
+    const h0 = A.h2h[a + '-' + b]; const hg = h0 ? h0.games.filter(x => ownY(a, x.yi) === oa && ownY(b, x.yi) === ob) : [];
+    const hw = hg.filter(x => x.sx > x.sy).length, hl = hg.filter(x => x.sx < x.sy).length, ht = hg.length - hw - hl;
+    const lastG = hg.length ? [...hg].sort((x, y) => y.yi - x.yi || y.w - x.w)[0] : null;
+    return { w, a, b, pa: ma, pb: mb, winA: pa, h2h: [hw, hl, ht], last: lastG, poA: hg.filter(x => x.kind === 'playoff').length, stakes: odds ? [odds[a].ifW, odds[a].ifL, odds[b].ifW, odds[b].ifL] : null };
   }) : [];
   // luck: each week a score is worth the share of the league it beat (expected wins); luck = actual result minus that
   const luckWeeks = (gs, yi) => {
@@ -1108,6 +1113,12 @@ const P = id => `<button class="plink" data-p="${id}">${esc(pname(id))}</button>
 const FL = (f, yi = last, withOwner = true) => `<span class="fdot" style="--fcol:${fcol(f)}"></span><button class="flink team" data-f="${f}">${esc(team(f, yi)[0])}</button>${withOwner ? ` <span class="owner">${esc(team(f, yi)[1])}</span>` : ''}`;
 const FN = (f, yi = last, d) => `<span class="fdot" style="--fcol:${fcol(f)}"></span><button class="flink" data-f="${f}">${esc(owner(f, yi, d))}</button>`;
 const ownersOf = f => { const o = []; years.forEach((_, k) => { const n = owner(f, k); if (n && !o.includes(n) && !o.some(x => x.startsWith(n + ' ') || n.startsWith(x + ' '))) o.push(n); }); return o; };
+// all owners of a franchise, current first (for all-time views of a team that changed hands)
+const shortOf = n => { const o = String(n || '').split(' ').filter((x, i) => i === 0 || !/^["“(']/.test(x)); return o.length > 1 ? `${o[0]} ${o[o.length - 1][0]}.` : o[0]; };
+const ownersCurFirst = f => { const o = ownersOf(f); const c = owner(f); return [c, ...o.filter(x => x !== c)]; };
+const shortH = f => ownersCurFirst(f).map(shortOf).join(' / ');
+const FSH = f => `<span class="fdot" style="--fcol:${fcol(f)}"></span><button class="flink" data-f="${f}">${esc(shortH(f))}</button>`;
+const FLH = f => `<span class="fdot" style="--fcol:${fcol(f)}"></span><button class="flink team" data-f="${f}">${esc(team(f, last)[0])}</button> <span class="owner">${esc(ownersCurFirst(f).join(' / '))}</span>`;
 const FA = f => { const o = ownersOf(f); return o.length > 1 ? `<span class="fdot" style="--fcol:${fcol(f)}"></span><button class="flink" data-f="${f}">${esc([owner(f), ...o.filter(x => x !== owner(f))].join(' / '))}</button>` : FN(f); };
 const FS = (f, yi = last, d) => `<span class="fdot" style="--fcol:${fcol(f)}"></span><button class="flink" data-f="${f}">${esc(short(f, yi, d))}</button>`;
 const POSL = ['QB', 'RB', 'WR', 'TE', 'DL', 'LB', 'DB'];
@@ -1254,7 +1265,7 @@ function viewOverview() {
   const ET = {}; A.franchises.forEach(s0 => ET[s0.f] = earlyTitles(s0.f));
   const nTit = s0 => s0.titles.length + (ET[s0.f] || 0);
   const rows = [...A.franchises].sort((a, b) => nTit(b) - nTit(a) || (b.w / (b.w + b.l || 1)) - (a.w / (a.w + a.l || 1)));
-  const tbl = rows.map(s => `<tr><td>${FL(s.f)}</td><td class="num">${rec(s.w, s.l, s.t)}</td><td class="num hm">${pct(s.w / ((s.w + s.l + s.t) || 1))}</td><td class="num">${n0(s.pf / Math.max(1, s.seasons.length))}</td><td class="num">${nTit(s) ? `<span class="tag gold">${nTit(s)}×</span>` : '–'}</td><td class="num hm">${s.playoffs}</td><td class="num hm">${rec(s.pw, s.pl)}</td>${A.franchises.some(x => x.lb) ? `<td class="num hm">${s.lb ? `${s.lb} · ${rec(s.lbw, s.lbl)}` : '–'}</td>` : ''}<td class="num hm">${pct(s.eff)}</td></tr>`).join('');
+  const tbl = rows.map(s => `<tr><td>${FLH(s.f)}</td><td class="num">${rec(s.w, s.l, s.t)}</td><td class="num hm">${pct(s.w / ((s.w + s.l + s.t) || 1))}</td><td class="num">${n0(s.pf / Math.max(1, s.seasons.length))}</td><td class="num">${nTit(s) ? `<span class="tag gold">${nTit(s)}×</span>` : '–'}</td><td class="num hm">${s.playoffs}</td><td class="num hm">${rec(s.pw, s.pl)}</td>${A.franchises.some(x => x.lb) ? `<td class="num hm">${s.lb ? `${s.lb} · ${rec(s.lbw, s.lbl)}` : '–'}</td>` : ''}<td class="num hm">${pct(s.eff)}</td></tr>`).join('');
   const nT = A.trades.length;
   const pairs = Object.entries(A.partner).sort((a, b) => b[1] - a[1]);
   const [pk, pc] = pairs[0]; const [pa, pb] = pk.split('-').map(Number);
@@ -1268,8 +1279,8 @@ function viewOverview() {
   <div class="champs">${champsEarly}${champs}</div>
   <div class="facts">
     <div class="fact"><div class="eyebrow">Completed trades</div><div class="big">${nT}</div><div class="sub">Since ${years[0]}, across ${years.length} seasons</div></div>
-    <div class="fact"><div class="eyebrow">Most frequent trade partners</div><div class="big">${pc}</div><div class="sub">${FS(pa)} and ${FS(pb)}</div></div>
-    <div class="fact"><div class="eyebrow">Never traded with each other</div><div class="big">${allPairs.length}</div><div class="sub">${allPairs.length ? allPairs.slice(0, 3).map(([a, b]) => `${esc(short(a))} & ${esc(short(b))}`).join(', ') + (allPairs.length > 3 ? ', and more' : '') : 'Every pair has made a deal'}</div></div>
+    <div class="fact"><div class="eyebrow">Most frequent trade partners</div><div class="big">${pc}</div><div class="sub">${FSH(pa)} and ${FSH(pb)}</div></div>
+    <div class="fact"><div class="eyebrow">Never traded with each other</div><div class="big">${allPairs.length}</div><div class="sub">${allPairs.length ? allPairs.slice(0, 3).map(([a, b]) => `${esc(shortH(a))} & ${esc(shortH(b))}`).join(', ') + (allPairs.length > 3 ? ', and more' : '') : 'Every pair has made a deal'}</div></div>
     ${bb ? `<div class="fact"><div class="eyebrow">Biggest FAAB bid</div><div class="big">${money(A.bid(bb))}</div><div class="sub">${P(bb.pid)} to ${FS(bb.fid, bb.sy)}, ${yr(bb.sy)}</div></div>` : ""}
     <div class="fact"><div class="eyebrow">Most traveled player</div><div class="big">${tv[1]}</div><div class="sub">${P(tv[0].id)} has played for ${tv[1]} of ${NFR} franchises</div></div>
     <div class="fact"><div class="eyebrow">Most lopsided trade</div><div class="big">${n0(heist.diff)}</div><div class="sub">Points of separation. <button class="tlink" data-t="${heist.i}">${esc(short(heist.winner, heist.yi, heist.d))} won it in ${yr(heist.yi)}</button></div></div>
@@ -1501,7 +1512,7 @@ function viewTrades(focus) {
   let mx = '<table class="matrix"><thead><tr><th></th>' + Array.from({ length: 12 }, (_, i) => `<th style="vertical-align:bottom"><div class="colh">${esc(short(i + 1))}</div><div class="colbar" style="background:${fcol(i + 1)}"></div></th>`).join('') + '</tr></thead><tbody>';
   const maxP = Math.max(...Object.values(A.partner));
   for (let a = 1; a <= 12; a++) {
-    mx += `<tr><th class="rowh"><span class="fdot" style="--fcol:${fcol(a)}"></span>${esc(short(a))}</th>`;
+    mx += `<tr><th class="rowh"><span class="fdot" style="--fcol:${fcol(a)}"></span>${esc(shortH(a))}</th>`;
     for (let b = 1; b <= 12; b++) {
       if (a === b) { mx += '<td><span class="mc self"></span></td>'; continue; }
       const k = Math.min(a, b) + '-' + Math.max(a, b); const c = A.partner[k] || 0;
@@ -1513,12 +1524,12 @@ function viewTrades(focus) {
   mx += '</tbody></table>';
   if (focus != null) { const ix = list.findIndex(t => t.i === focus); if (ix >= tstate.n) tstate.n = ix + 1; }
   const shown = list.slice(0, tstate.n);
-  const pairLabel = tstate.pair ? (() => { const [a, b] = tstate.pair.split('-').map(Number); return `<span class="tag cur">${esc(short(a))} × ${esc(short(b))}</span> <button class="btn" id="clrpair">Clear pair</button>`; })() : '';
+  const pairLabel = tstate.pair ? (() => { const [a, b] = tstate.pair.split('-').map(Number); return `<span class="tag cur">${esc(shortH(a))} × ${esc(shortH(b))}</span> <button class="btn" id="clrpair">Clear pair</button>`; })() : '';
   main.innerHTML = (focus == null ? tradeRoom() : '') + `<section id="tr-log"><h2 class="sec">Trade log</h2><p class="lede">Every completed trade since ${years[0]}, graded by the value each side got out of it: points over a replacement starter, using this league's lineup rules. An asterisk means the value is still growing.</p><details class="lk-how" style="margin-top:8px"><summary>How trades are graded</summary><p class="sub" style="font-size:14px;max-width:68ch">Players count the value they added as starters for the team that traded for them. A pick the team used counts what the player it drafted scored for them. A pick the team traded away again counts its draft slot's value: what a player taken at that slot has typically given the team that drafted him in this league, from a 1.01 down to the last pick. Undrafted or unmatched picks count their round's average. Each pick shows the path it took to the player it became. <a href="#picks">How pick values work</a>.</p></details>${valueHow()}</p></section>
   <div class="grid2 tr-side">
     <section class="card pad"><h3>Who trades with whom</h3><p class="sub">Number of trades between each pair of franchises, labeled by current owner. Tap a square to see those trades.</p><div class="tbl" style="margin-top:10px">${mx}</div></section>
     <section class="card pad"><h3>Trade volume by season</h3><div class="bars" style="margin-top:10px">${years.map((y, yi) => { const c = A.trades.filter(t => t.yi === yi).length; const m = Math.max(...years.map((_, k) => A.trades.filter(t => t.yi === k).length)); return `<div class="bar"><span>${y}</span><span class="t"><i style="width:${c / m * 100}%"></i></span><span class="num">${c}</span></div>`; }).join('')}</div>
-    <h3 style="margin-top:18px">Most active traders</h3><ol class="list">${Array.from({ length: 12 }, (_, i) => i + 1).map(f => [f, A.trades.filter(t => t.f1 === f || t.f2 === f)]).sort((a, b) => b[1].length - a[1].length).slice(0, 6).map(([f, ts], i) => { const won = ts.filter(t => t.winner === f).length, lost = ts.filter(t => t.winner && t.winner !== f).length; return `<li><span><span class="rk">${i + 1}</span>${FS(f)} <span class="owner">won ${won}, lost ${lost}</span></span><span class="v">${ts.length}</span></li>`; }).join('')}</ol></section>
+    <h3 style="margin-top:18px">Most active traders</h3><ol class="list">${Array.from({ length: 12 }, (_, i) => i + 1).map(f => [f, A.trades.filter(t => t.f1 === f || t.f2 === f)]).sort((a, b) => b[1].length - a[1].length).slice(0, 6).map(([f, ts], i) => { const won = ts.filter(t => t.winner === f).length, lost = ts.filter(t => t.winner && t.winner !== f).length; return `<li><span><span class="rk">${i + 1}</span>${FSH(f)} <span class="owner">won ${won}, lost ${lost}</span></span><span class="v">${ts.length}</span></li>`; }).join('')}</ol></section>
   </div>
   <section class="card"><div class="pad controls">
     <label for="tyr">Season<select id="tyr">${yearOpts(tstate.yi)}</select></label>
@@ -1714,7 +1725,7 @@ function viewWaivers() {
   const tr = rows.sort((a, b) => b.spent - a.spent).map(r => `<tr><td>${FS(r.f, yi)}</td><td class="num">${money(r.spent)}</td><td class="num">${r.claims}</td><td class="num hm">${money(r.max)}</td><td class="num">${r.adds}</td><td class="num">${r.drops}</td><td class="num">${r.trades}</td></tr>`).join('');
   // spending heat by owner x season
   let heat = `<table class="heat"><thead><tr><th>Owner</th>${years.map(y => `<th class="num">'${String(y).slice(2)}</th>`).join('')}<th class="num">Total</th></tr></thead><tbody>`;
-  for (let f = 1; f <= 12; f++) { let tot = 0; heat += `<tr><td>${FS(f)}</td>` + years.map((_, k) => { const s = A.faab[k][f].spent; tot += s; return `<td class="h" style="background:color-mix(in oklab, var(--accent) ${Math.round(s / maxSpent * 70)}%, transparent)">${s ? n0(s) : '·'}</td>`; }).join('') + `<td class="num"><b>${n0(tot)}</b></td></tr>`; }
+  for (let f = 1; f <= 12; f++) { let tot = 0; heat += `<tr><td>${FSH(f)}</td>` + years.map((_, k) => { const s = A.faab[k][f].spent; tot += s; return `<td class="h" style="background:color-mix(in oklab, var(--accent) ${Math.round(s / maxSpent * 70)}%, transparent)">${s ? n0(s) : '·'}</td>`; }).join('') + `<td class="num"><b>${n0(tot)}</b></td></tr>`; }
   heat += '</tbody></table>';
   const bt = A.bidTrend; const mx = Math.max(...bt.map(b => b.avg));
   const bars = bt.map(b => `<div class="bar"><span>${b.y}</span><span class="t"><i style="width:${mx ? b.avg / mx * 100 : 0}%"></i></span><span class="num">${money(b.avg.toFixed(2))}</span></div>`).join('');
@@ -1727,10 +1738,10 @@ function viewWaivers() {
   <div class="grid2">
     ${noF ? '' : `<section class="card pad"><h3>FAAB spent by season</h3><div class="tbl" style="margin-top:8px">${heat}</div></section>`}
     <section class="card pad">${noF ? '' : `<h3>Average winning bid</h3><p class="sub">Claims with a bid above zero.</p><div class="bars" style="margin-top:10px">${bars}</div>`}
-      <h3 style="${noF ? '' : 'margin-top:18px'}">Busiest on the wire</h3><p class="sub">Claims plus free agent adds, all seasons.</p><ol class="list">${act.slice(0, 6).map(([f, c], i) => `<li><span><span class="rk">${i + 1}</span>${FS(f)}</span><span class="v">${c}</span></li>`).join('')}</ol></section>
+      <h3 style="${noF ? '' : 'margin-top:18px'}">Busiest on the wire</h3><p class="sub">Claims plus free agent adds, all seasons.</p><ol class="list">${act.slice(0, 6).map(([f, c], i) => `<li><span><span class="rk">${i + 1}</span>${FSH(f)}</span><span class="v">${c}</span></li>`).join('')}</ol></section>
   </div>
   <div class="grid3">
-    <section class="card pad"><h3>Hit rate</h3><p class="sub">Share of pickups that started ${A.HIT}+ games.</p><ol class="list">${[...A.hitRate].sort((a, b) => b.rate - a.rate).map((h, i) => `<li><span><span class="rk">${i + 1}</span>${FS(h.f)} <span class="owner">${h.hits} of ${h.n}</span></span><span class="v">${pct(h.rate)}</span></li>`).join('')}</ol></section>
+    <section class="card pad"><h3>Hit rate</h3><p class="sub">Share of pickups that started ${A.HIT}+ games.</p><ol class="list">${[...A.hitRate].sort((a, b) => b.rate - a.rate).map((h, i) => `<li><span><span class="rk">${i + 1}</span>${FSH(h.f)} <span class="owner">${h.hits} of ${h.n}</span></span><span class="v">${pct(h.rate)}</span></li>`).join('')}</ol></section>
     <section class="card pad"><h3>Best pickups ever</h3><p class="sub">Started points for the team that picked him up.</p><ol class="list">${A.bestPickups.slice(0, 15).map((s, i) => `<li><span><span class="rk">${i + 1}</span>${P(s.pid)}<br><span class="owner">${esc(short(s.fid, s.sy))}, ${yr(s.sy)}, ${s.how.k === 'W' ? (A.bid(s) ? money(A.bid(s)) + ' claim' : '$0 claim') : 'free agent'}</span></span><span class="v">${n0(s.pts)}</span></li>`).join('')}</ol></section>
     ${noF ? '' : `<section class="card pad"><h3>Biggest bids</h3><p class="sub">And what they returned in started points.</p><ol class="list">${A.bigBids.slice(0, 15).map((s, i) => `<li><span><span class="rk">${i + 1}</span>${P(s.pid)}<br><span class="owner">${esc(short(s.fid, s.sy))}, ${yr(s.sy)} · ${n0(s.pts)} pts</span></span><span class="v">${money(A.bid(s))}</span></li>`).join('')}</ol></section>`}
   </div>`;
@@ -1779,7 +1790,7 @@ function viewFranchises(f) {
   <div class="grid3">
     <section class="card pad"><h3>Franchise legends</h3><p class="sub">Most started points for this franchise, all stints combined.</p><ol class="list">${legends.map((x, i) => `<li><span><span class="rk">${i + 1}</span>${P(x.pid)}</span><span class="v">${n0(x.pts)}</span></li>`).join('')}</ol></section>
     <section class="card pad"><h3>Longest-tenured now</h3><p class="sub">Current roster, by when they arrived.</p><ol class="list">${cur.map((x, i) => `<li><span><span class="rk">${i + 1}</span>${P(x.pid)}</span><span class="owner">since ${yr(x.sy)}</span></li>`).join('')}</ol></section>
-    <section class="card pad"><h3>Trade partners</h3><ol class="list">${partners.slice(0, 6).map(([k, c], i) => `<li><span><span class="rk">${i + 1}</span>${FS(k)}</span><span class="v">${c}</span></li>`).join('')}</ol>
+    <section class="card pad"><h3>Trade partners</h3><ol class="list">${partners.slice(0, 6).map(([k, c], i) => `<li><span><span class="rk">${i + 1}</span>${FSH(k)}</span><span class="v">${c}</span></li>`).join('')}</ol>
       <h3 style="margin-top:16px">Roster carryover</h3><p class="sub">Share of last season's final roster still there at the end of the next.</p><div class="bars" style="margin-top:8px">${kept.map((k, i) => `<div class="bar"><span>${years[i + 1]}</span><span class="t"><i style="width:${k * 100}%;background:${fcol(f)}"></i></span><span class="num">${pct(k)}</span></div>`).join('')}</div></section>
   </div>`;
   main.querySelectorAll('[data-fsel]').forEach(b => b.onclick = () => go('f' + b.dataset.fsel));
@@ -1790,7 +1801,7 @@ let rpair = null;
 function viewRivalries() {
   let mx = '<table class="matrix"><thead><tr><th></th>' + Array.from({ length: 12 }, (_, i) => `<th style="vertical-align:bottom"><div class="colh">${esc(short(i + 1))}</div><div class="colbar" style="background:${fcol(i + 1)}"></div></th>`).join('') + '</tr></thead><tbody>';
   for (let a = 1; a <= 12; a++) {
-    mx += `<tr><th class="rowh"><span class="fdot" style="--fcol:${fcol(a)}"></span>${esc(short(a))}</th>`;
+    mx += `<tr><th class="rowh"><span class="fdot" style="--fcol:${fcol(a)}"></span>${esc(shortH(a))}</th>`;
     for (let b = 1; b <= 12; b++) {
       if (a === b) { mx += '<td><span class="mc self"></span></td>'; continue; }
       const h = A.h2h[a + '-' + b] || { w: 0, l: 0, t: 0 }; const n = h.w + h.l + h.t; const p = n ? (h.w + h.t / 2) / n : .5;
@@ -1807,13 +1818,13 @@ function viewRivalries() {
   let detail = '<p class="sub">Tap any square to see every game between those two franchises.</p>';
   if (rpair) {
     const [a, b] = rpair.split('-').map(Number); const h = A.h2h[rpair];
-    if (h) detail = `<h3>${esc(short(a))} vs ${esc(short(b))}</h3><p class="sub">${esc(owner(a))} is ${rec(h.w, h.l, h.t)} with ${n1(h.pf)} points for and ${n1(h.pa)} against.</p><div class="tbl"><table><thead><tr><th>Season</th><th>Week</th><th class="num">${esc(short(a))}</th><th class="num">${esc(short(b))}</th><th></th></tr></thead><tbody>${[...h.games].sort((x, y) => y.yi - x.yi || y.w - x.w).map(g => `<tr><td>${years[g.yi]}</td><td>${g.w}${g.kind === 'playoff' ? ' <span class="tag">Playoffs</span>' : ''}</td><td class="num">${n1(g.sx)}</td><td class="num">${n1(g.sy)}</td><td>${g.sx > g.sy ? '<span class="tag w">W</span>' : g.sx < g.sy ? '<span class="tag l">L</span>' : '<span class="tag">T</span>'}</td></tr>`).join('')}</tbody></table></div>`;
+    if (h) detail = `<h3>${esc(shortH(a))} vs ${esc(shortH(b))}</h3><p class="sub">${esc(owner(a))} is ${rec(h.w, h.l, h.t)} with ${n1(h.pf)} points for and ${n1(h.pa)} against.</p><div class="tbl"><table><thead><tr><th>Season</th><th>Week</th><th class="num">${esc(shortH(a))}</th><th class="num">${esc(shortH(b))}</th><th></th></tr></thead><tbody>${[...h.games].sort((x, y) => y.yi - x.yi || y.w - x.w).map(g => `<tr><td>${years[g.yi]}</td><td>${g.w}${g.kind === 'playoff' ? ' <span class="tag">Playoffs</span>' : ''}</td><td class="num">${n1(g.sx)}</td><td class="num">${n1(g.sy)}</td><td>${g.sx > g.sy ? '<span class="tag w">W</span>' : g.sx < g.sy ? '<span class="tag l">L</span>' : '<span class="tag">T</span>'}</td></tr>`).join('')}</tbody></table></div>`;
   }
   main.innerHTML = `<section><h2 class="sec">Rivalries</h2><p class="lede">Head-to-head records for every pairing, regular season plus championship bracket games. Read across a row: green means the row owner leads the series.</p></section>
   <div class="grid2"><section class="card pad"><div class="tbl">${mx}</div></section><section class="card pad" id="rdet">${detail}</section></div>
   <div class="grid2">
     <section class="card pad"><h3>Most one-sided series</h3><p class="sub">At least six meetings.</p><ol class="list">${lopsided.map((p, i) => { const lead = p.h.w >= p.h.l ? [p.a, p.b, p.h.w, p.h.l] : [p.b, p.a, p.h.l, p.h.w]; return `<li><span><span class="rk">${i + 1}</span>${FS(lead[0])} over ${FS(lead[1])}</span><span class="v">${lead[2]}–${lead[3]}</span></li>`; }).join('')}</ol></section>
-    <section class="card pad"><h3>Playoff rivalries</h3><p class="sub">Pairs that keep meeting in the championship bracket.</p><ol class="list">${playoffRiv.map((p, i) => { const g = p.h.games.filter(x => x.kind === 'playoff'); const w = g.filter(x => x.sx > x.sy).length; return `<li><span><span class="rk">${i + 1}</span>${FS(p.a)} vs ${FS(p.b)} <span class="owner">${esc(short(p.a))} ${w}–${g.length - w}</span></span><span class="v">${p.po}</span></li>`; }).join('')}</ol></section>
+    <section class="card pad"><h3>Playoff rivalries</h3><p class="sub">Pairs that keep meeting in the championship bracket.</p><ol class="list">${playoffRiv.map((p, i) => { const g = p.h.games.filter(x => x.kind === 'playoff'); const w = g.filter(x => x.sx > x.sy).length; return `<li><span><span class="rk">${i + 1}</span>${FSH(p.a)} vs ${FSH(p.b)} <span class="owner">${esc(shortH(p.a))} ${w}–${g.length - w}</span></span><span class="v">${p.po}</span></li>`; }).join('')}</ol></section>
   </div>`;
   main.querySelectorAll('[data-rp]').forEach(b => b.onclick = () => { rpair = b.dataset.rp; viewRivalries(); $('#rdet').scrollIntoView({ block: 'nearest' }); });
 }
@@ -2050,35 +2061,46 @@ function viewPostseason() {
   const FR = A.franchises.filter(s0 => s0.seasons.length);
   const done = years.map((_, yi) => yi).filter(yi => { const c = A.champions[yi]; return c && c.champ; });
   const HASLB = FR.some(s0 => s0.lb);
+  // credit each season to whoever owned the team that season (co-owners each get it)
+  const sp = o => (typeof splitO === 'function' ? splitO(o) : [o]);
+  const OW = {};
+  const get = (o, fr, yi) => { const x = OW[o] = OW[o] || { o, f: fr, yi, seasons: [], playoffs: 0, pw: 0, pl: 0, titles: [], finals: [], lb: 0, lbw: 0, lbl: 0, lbT: [], po: {} }; if (fr && yi >= x.yi) { x.f = fr; x.yi = yi; } return x; };
+  FR.forEach(s0 => s0.seasons.forEach(r => { if (!done.includes(r.yi)) return; const c = A.champions[r.yi]; sp(owner(s0.f, r.yi)).forEach(o => { const x = get(o, s0.f, r.yi); x.seasons.push(r.yi); const P = s0.post[r.yi];
+    if (P && P.po) { x.playoffs++; x.po[r.yi] = 1; x.pw += P.w; x.pl += P.l; } else if (P && P.br) { x.lb++; x.lbw += P.w; x.lbl += P.l; if (P.won) x.lbT.push([years[r.yi], P.won]); }
+    if (c.champ === s0.f) x.titles.push(years[r.yi]); if (c.runner === s0.f) x.finals.push(years[r.yi]); }); }));
+  (typeof EARLY_ALL !== 'undefined' ? EARLY_ALL : []).forEach(e => { [[e[4], 'titles'], [e[5], 'finals']].forEach(([o0, k]) => o0 && sp(o0).forEach(o => { const fy = typeof fyOf === 'function' ? fyOf(o) : null; get(o, fy ? fy[0] : 0, fy ? fy[1] : -1)[k].push(e[0]); })); });
+  const OWN = Object.values(OW).filter(x => x.seasons.length || x.titles.length);
+  const ON = x => x.f ? `<span class="fdot" style="--fcol:${fcol(x.f)}"></span><button class="flink" data-f="${x.f}">${esc(x.o)}</button>` : esc(x.o);
   const lbNames = {}; done.forEach(yi => A.playoff[yi].forEach(br => { const cb = A.playoff[yi].find(b => b.teams.includes(A.champions[yi].champ) && b.games.length >= 3) || A.playoff[yi][0]; if (br !== cb && !br.teams.some(t => cb.teams.includes(t))) lbNames[br.name] = (lbNames[br.name] || 0) + 1; }));
   const lbLabel = Object.entries(lbNames).sort((a, b) => b[1] - a[1]).map(x => x[0]).slice(0, 2).join(' / ') || 'Losers bracket';
   const wl = (w, l) => w + l ? rec(w, l) : '–';
   const wp = (w, l) => w + l ? pct(w / (w + l)) : '–';
-  const rows = [...FR].sort((a, b) => b.playoffs - a.playoffs || b.titles.length - a.titles.length || (b.pw - b.pl) - (a.pw - a.pl));
-  const tbl = rows.map(s0 => `<tr><td>${FN(s0.f)}</td><td class="num"><b>${s0.playoffs}</b> <span class="owner">of ${s0.seasons.filter(x => done.includes(x.yi)).length}</span></td><td class="num">${wl(s0.pw, s0.pl)}</td><td class="num hm">${wp(s0.pw, s0.pl)}</td><td class="num">${s0.titles.length ? `<span class="tag gold">${s0.titles.length}×</span>` : '–'}</td><td class="num hm">${s0.finals.length || '–'}</td>${HASLB ? `<td class="num">${s0.lb || '–'}</td><td class="num">${wl(s0.lbw, s0.lbl)}</td><td class="hm">${s0.lbT.length ? s0.lbT.map(x => `<span class="tag">${esc(x[1])} ${x[0]}</span>`).join(' ') : '–'}</td>` : ''}</tr>`).join('');
-  // streaks and droughts in the playoffs
-  const streak = s0 => { let best = 0, run = 0, bestEnd = null; done.forEach(yi => { const inS = s0.seasons.some(x => x.yi === yi); if (!inS) { run = 0; return; } if (s0.post[yi] && s0.post[yi].po) { run++; if (run > best) { best = run; bestEnd = yi; } } else run = 0; }); return { best, bestEnd }; };
-  const drought = s0 => { let n = 0; for (let i = done.length - 1; i >= 0; i--) { const yi = done[i]; if (!s0.seasons.some(x => x.yi === yi)) break; if (s0.post[yi] && s0.post[yi].po) break; n++; } return n; };
+  const rows = [...OWN].sort((a, b) => b.playoffs - a.playoffs || b.titles.length - a.titles.length || (b.pw - b.pl) - (a.pw - a.pl));
+  const tbl = rows.map(x => `<tr><td>${ON(x)}</td><td class="num"><b>${x.playoffs}</b> <span class="owner">of ${x.seasons.length}</span></td><td class="num">${wl(x.pw, x.pl)}</td><td class="num hm">${wp(x.pw, x.pl)}</td><td class="num">${x.titles.length ? `<span class="tag gold">${x.titles.length}×</span>` : '–'}</td><td class="num hm">${x.finals.length || '–'}</td>${HASLB ? `<td class="num">${x.lb || '–'}</td><td class="num">${wl(x.lbw, x.lbl)}</td><td class="hm">${x.lbT.length ? x.lbT.map(t => `<span class="tag">${esc(t[1])} ${t[0]}</span>`).join(' ') : '–'}</td>` : ''}</tr>`).join('');
+  // streaks and droughts in the playoffs, over each owner's own seasons
+  const streak = x => { let best = 0, run = 0, bestEnd = null, prev = null; [...x.seasons].sort((a, b) => a - b).forEach(yi => { if (prev != null && done.indexOf(yi) !== done.indexOf(prev) + 1) run = 0; prev = yi; if (x.po[yi]) { run++; if (run > best) { best = run; bestEnd = yi; } } else run = 0; }); return { best, bestEnd }; };
+  const drought = x => { let n = 0; const ss = [...x.seasons].sort((a, b) => b - a); for (const yi of ss) { if (x.po[yi]) break; n++; } return n; };
   const fact = (eb, html) => html ? `<div class="fact"><div class="eyebrow">${eb}</div><div>${html}</div></div>` : '';
   const top = (arr, fn) => [...arr].sort(fn)[0];
-  const cur = FR.filter(s0 => s0.seasons.some(x => x.yi === last));
-  const mostPO = top(FR, (a, b) => b.playoffs - a.playoffs);
-  const bestPO = top(FR.filter(s0 => s0.pw + s0.pl >= 4), (a, b) => b.pw / (b.pw + b.pl) - a.pw / (a.pw + a.pl));
-  const winsNoRing = top(FR.filter(s0 => !s0.titles.length && !(typeof earlyTitles === 'function' && earlyTitles(s0.f))), (a, b) => b.pw - a.pw);
-  const stk = FR.map(s0 => [s0, streak(s0)]).sort((a, b) => b[1].best - a[1].best)[0];
-  const dr = cur.map(s0 => [s0, drought(s0)]).sort((a, b) => b[1] - a[1])[0];
-  const mostLB = HASLB ? top(FR, (a, b) => b.lb - a.lb) : null;
-  const bestLB = HASLB ? top(FR.filter(s0 => s0.lbw + s0.lbl >= 3), (a, b) => b.lbw / (b.lbw + b.lbl) - a.lbw / (a.lbw + a.lbl) || b.lbw - a.lbw) : null;
-  const lbKing = HASLB ? top(FR.filter(s0 => s0.lbT.length), (a, b) => b.lbT.length - a.lbT.length) : null;
+  const lastDone = done[done.length - 1];
+  const cur = OWN.filter(x => x.seasons.includes(lastDone));
+  const mostPO = top(OWN, (a, b) => b.playoffs - a.playoffs);
+  const bestPO = top(OWN.filter(x => x.pw + x.pl >= 4), (a, b) => b.pw / (b.pw + b.pl) - a.pw / (a.pw + a.pl));
+  const winsNoRing = top(OWN.filter(x => !x.titles.length), (a, b) => b.pw - a.pw);
+  const stk = OWN.map(x => [x, streak(x)]).sort((a, b) => b[1].best - a[1].best)[0];
+  const dr = cur.map(x => [x, drought(x)]).sort((a, b) => b[1] - a[1])[0];
+  const mostLB = HASLB ? top(OWN, (a, b) => b.lb - a.lb) : null;
+  const bestLB = HASLB ? top(OWN.filter(x => x.lbw + x.lbl >= 3), (a, b) => b.lbw / (b.lbw + b.lbl) - a.lbw / (a.lbw + a.lbl) || b.lbw - a.lbw) : null;
+  const lbKing = HASLB ? top(OWN.filter(x => x.lbT.length), (a, b) => b.lbT.length - a.lbT.length) : null;
   const facts = [
-    fact('Most playoff trips', mostPO && `${FN(mostPO.f)} has made it <b>${mostPO.playoffs} times</b>.`),
-    fact('Best playoff record', bestPO && `${FN(bestPO.f)} is <b>${rec(bestPO.pw, bestPO.pl)}</b> in the playoffs (${pct(bestPO.pw / (bestPO.pw + bestPO.pl))}).`),
-    fact('Most playoff wins without a title', winsNoRing && winsNoRing.pw && `${FN(winsNoRing.f)} has won <b>${winsNoRing.pw}</b> playoff ${winsNoRing.pw === 1 ? 'game' : 'games'} and no championship.`),
-    fact('Longest playoff streak', stk && stk[1].best > 1 && `${FN(stk[0].f)} made <b>${stk[1].best} straight</b> playoffs, through ${years[stk[1].bestEnd]}.`),
-    fact('Longest active drought', dr && dr[1] > 1 && `${FN(dr[0].f)} has missed the playoffs <b>${dr[1]} straight</b> seasons.`),
-    HASLB ? fact('Most losers bracket trips', mostLB && mostLB.lb && `${FN(mostLB.f)} has landed there <b>${mostLB.lb} times</b>.`) : '',
-    HASLB ? fact('Best losers bracket record', bestLB && `${FN(bestLB.f)} is <b>${rec(bestLB.lbw, bestLB.lbl)}</b> in losers bracket games.`) : '',
-    HASLB ? fact('Most losers bracket crowns', lbKing && `${FN(lbKing.f)} has won it <b>${lbKing.lbT.length} ${lbKing.lbT.length === 1 ? 'time' : 'times'}</b> (${lbKing.lbT.map(x => `${esc(x[1])} ${x[0]}`).join(', ')}).`) : '',
+    fact('Most playoff trips', mostPO && `${ON(mostPO)} has made it <b>${mostPO.playoffs} times</b>.`),
+    fact('Best playoff record', bestPO && `${ON(bestPO)} is <b>${rec(bestPO.pw, bestPO.pl)}</b> in the playoffs (${pct(bestPO.pw / (bestPO.pw + bestPO.pl))}).`),
+    fact('Most playoff wins without a title', winsNoRing && winsNoRing.pw && `${ON(winsNoRing)} has won <b>${winsNoRing.pw}</b> playoff ${winsNoRing.pw === 1 ? 'game' : 'games'} and no championship.`),
+    fact('Longest playoff streak', stk && stk[1].best > 1 && `${ON(stk[0])} made <b>${stk[1].best} straight</b> playoffs, through ${years[stk[1].bestEnd]}.`),
+    fact('Longest active drought', dr && dr[1] > 1 && `${ON(dr[0])} has missed the playoffs <b>${dr[1]} straight</b> seasons.`),
+    HASLB ? fact('Most losers bracket trips', mostLB && mostLB.lb && `${ON(mostLB)} has landed there <b>${mostLB.lb} times</b>.`) : '',
+    HASLB ? fact('Best losers bracket record', bestLB && `${ON(bestLB)} is <b>${rec(bestLB.lbw, bestLB.lbl)}</b> in losers bracket games.`) : '',
+    HASLB ? fact('Most losers bracket crowns', lbKing && `${ON(lbKing)} has won it <b>${lbKing.lbT.length} ${lbKing.lbT.length === 1 ? 'time' : 'times'}</b> (${lbKing.lbT.map(t => `${esc(t[1])} ${t[0]}`).join(', ')}).`) : '',
   ].join('');
   // year by year
   const SIDE = done.some(yi => { const c = A.champions[yi]; const brs = A.playoff[yi]; const cb = brs.find(b => b.teams.includes(c.champ) && b.winner === c.champ) || brs[0]; return brs.some(b => b !== cb && b.teams.some(t => cb.teams.includes(t)) && b.winner); }) || (typeof EARLY_ALL !== 'undefined' && EARLY_ALL.some(e => e[3]));
@@ -2091,7 +2113,7 @@ function viewPostseason() {
   const eRows = early.slice().reverse().map(e => `<tr><td><b>${e[0]}</b></td><td>${esc(e[4] || e[1])} <span class="owner">${esc(e[1])}</span></td><td>${esc(e[5] || e[2])}</td>${SIDE ? `<td class="hm">${e[3] ? `${esc(e[3])} <span class="owner">3rd</span>` : '–'}</td>` : ''}${HASLB ? '<td class="owner">Not recorded</td>' : ''}</tr>`).join('');
   main.innerHTML = `<section><h2 class="sec">Postseason</h2><p class="lede">Every playoff trip and every postseason game since ${years[0]}. Playoff records count the championship bracket plus side games like a third-place game.${HASLB ? ` Teams that miss the playoffs play in the losers bracket (${esc(lbLabel)}).` : ''}</p></section>
   <div class="facts">${facts}</div>
-  <section class="card" id="ps-table"><div class="pad"><h3>Postseason records</h3><p class="sub">Completed seasons only. Playoff trips out of seasons played.</p></div><div class="tbl"><table><thead><tr><th>Owner</th><th class="num">Playoffs</th><th class="num">Playoff W–L</th><th class="num hm">Win %</th><th class="num">Titles</th><th class="num hm">Finals lost</th>${HASLB ? `<th class="num">Losers bkt</th><th class="num">Losers W–L</th><th class="hm">Losers crowns</th>` : ''}</tr></thead><tbody>${tbl}</tbody></table></div></section>
+  <section class="card" id="ps-table"><div class="pad"><h3>Postseason records</h3><p class="sub">By owner, counting only the seasons each person ran the team. Playoff trips out of completed seasons played.</p></div><div class="tbl"><table><thead><tr><th>Owner</th><th class="num">Playoffs</th><th class="num">Playoff W–L</th><th class="num hm">Win %</th><th class="num">Titles</th><th class="num hm">Finals lost</th>${HASLB ? `<th class="num">Losers bkt</th><th class="num">Losers W–L</th><th class="hm">Losers crowns</th>` : ''}</tr></thead><tbody>${tbl}</tbody></table></div></section>
   <section class="card" id="ps-years"><div class="pad"><h3>Year by year</h3></div><div class="tbl"><table><thead><tr><th>Season</th><th>Champion</th><th>Runner-up</th>${SIDE ? '<th class="hm">Other places</th>' : ''}${HASLB ? '<th>Losers bracket</th>' : ''}</tr></thead><tbody>${yRows}${eRows}</tbody></table></div></section>`;
 }
 
