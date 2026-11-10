@@ -1126,7 +1126,7 @@ const lineupText = y => { const r = raw.repl && raw.repl[y]; if (!r) return ''; 
 const valueHow = () => { const ys = years.filter(y => raw.repl && raw.repl[y]); if (!ys.length) return ''; const cols = POSL.filter(p => ys.some(y => raw.repl[y].r[p] != null)); const ly = ys[ys.length - 1];
   return `<details class="lk-how" style="margin-top:8px"><summary>How value over replacement works</summary><div class="sub" style="font-size:14px;max-width:68ch"><p>A started week only counts for what it added over the player a team could have started instead. Each season, every team's lineup is filled with the league's best scorers using that season's lineup rules (${esc(lineupText(ly))} in ${ly}). The first player left out at each position sets that position's replacement level, and every start is scored as points minus that level, never below zero for an asset as a whole.</p><p>That is why a starting QB counts for less here than his raw points suggest: with one QB slot per team, the 13th-best QB is still a decent starter. Deeper positions and the flex spots push replacement lower for running backs and receivers, and IDP spots are scored against their own replacement. Raw started points still show in small type beside each value.</p><p>Wins added turns that value into wins. In this league one more point a week moves a team's odds of winning that week by a predictable amount, set by how spread out weekly scores are, so about <b>${n0(A.PPW)} points of value equal one win</b>. A trade that gave a team 250 points of value over replacement added close to ${n1(250 / A.PPW)} wins across the time those players were on the team.</p></div>
     <div class="tbl" style="margin-top:8px"><table><thead><tr><th>Season</th>${cols.map(p => `<th class="num">${p}</th>`).join('')}</tr></thead><tbody>${[...ys].reverse().map(y => `<tr><td>${y}</td>${cols.map(p => `<td class="num">${raw.repl[y].r[p] != null ? n1(raw.repl[y].r[p]) : '–'}</td>`).join('')}</tr>`).join('')}</tbody></table></div><p class="sub" style="margin-top:6px">Replacement level in points per game for each season.</p></details>`; };
-const ownerOpts = sel => `<option value="">All owners</option>` + Array.from({ length: 12 }, (_, i) => i + 1).map(f => `<option value="${f}"${+sel === f ? ' selected' : ''}>${esc(owner(f))} (${esc(curTeam(f))})</option>`).join('');
+const ownerOpts = sel => `<option value="">All owners</option>` + Array.from({ length: NF }, (_, i) => i + 1).map(f => `<option value="${f}"${+sel === f ? ' selected' : ''}>${esc(owner(f))} (${esc(curTeam(f))})</option>`).join('');
 const yearOpts = sel => `<option value="">All seasons</option>` + years.map((y, yi) => `<option value="${yi}"${sel !== '' && +sel === yi ? ' selected' : ''}>${y}</option>`).join('');
 const S = pid => A.stints(pid);
 const index = A.allP.map(p => ({ id: p, n: pname(p), k: pname(p).toLowerCase(), pos: raw.pl[p][1], nfl: raw.pl[p][2] }));
@@ -1137,6 +1137,8 @@ const EARLY_ALL = (raw.early || []).filter(e => !years.includes(e[0])).sort((a, 
 const splitO = o => (raw.co || {})[o] || [o];
 const fyOf = (() => { const m = {}; years.forEach((_, yi) => (L.fr[yi] || []).forEach((t, i) => { const o = owner(i + 1, yi); if (o) m[o] = [i + 1, yi]; })); return o => m[o] || null; })();
 const earlyTitles = f => EARLY_ALL.filter(e => e[4] && splitO(e[4]).some(o => (fyOf(o) || [])[0] === f)).length;
+// how many franchise slots the team-by-team views loop over: the real team count, capped at 12 (leagues that lost owners keep 12 current teams)
+const NF = (() => { let m = 0; years.forEach((_, yi) => (L.fr[yi] || []).forEach((t, i) => { if (t && !(/^Team \d+$/.test(t[0]) && !t[1])) m = Math.max(m, i + 1); })); return Math.min(12, m || 12); })();
 const NFR = (() => { const s = new Set(); years.forEach((_, yi) => (L.fr[yi] || []).forEach((t, i) => { if (t && !(/^Team \d+$/.test(t[0]) && !t[1])) s.add(i + 1); })); return s.size || 12; })();
 if (META.name) document.querySelector('.brand h1').textContent = META.name;
 const platformOf = yi => (raw.platform && raw.platform[years[yi]]) || '';
@@ -1215,7 +1217,7 @@ function viewTitles() {
   const homeShare = t => Math.round(((t.byS.R || 0) + (t.byS.S || 0)) / Math.max(1, Object.values(t.byS).reduce((x, y) => x + y, 0)) * 100);
   const heart = tc.filter(r => r.r.length).sort((a, b) => b.r.length - a.r.length)[0];
   const repeat = T.filter((t, i) => i && T[i - 1].f === t.f && owner(T[i - 1].f, T[i - 1].yi) === owner(t.f, t.yi));
-  const droughtY = years[last]; const champsAll = new Set(T.map(t => owner(t.f, t.yi))); const never = [...new Set(Array.from({ length: 12 }, (_, i) => owner(i + 1)))].filter(o => o && !champsAll.has(o));
+  const droughtY = years[last]; const champsAll = new Set(T.map(t => owner(t.f, t.yi))); const never = [...new Set(Array.from({ length: NF }, (_, i) => owner(i + 1)))].filter(o => o && !champsAll.has(o));
   const facts = `<div class="facts">${[
     low ? fs0('Lowest seed to win it', `${FS(low.f, low.yi)} won ${low.y} as the regular season's No. ${low.st.rank}, ${rec(low.st.w, low.st.l, low.st.t)}.`) : '',
     worstRec && worstRec !== low ? fs0('Worst record for a champion', `${FS(worstRec.f, worstRec.yi)} went ${rec(worstRec.st.w, worstRec.st.l, worstRec.st.t)} in ${worstRec.y} and still took the title.`) : '',
@@ -1264,12 +1266,12 @@ function viewOverview() {
     return `<div class="champ" style="--fcol:${fc}"><div class="yr">${e[0]}</div><div class="eyebrow">Champion</div><div class="nm">${fy ? `<button class="flink" data-f="${fy[0]}">${esc(e[1])}</button>` : esc(e[1])}</div><div class="sub">${esc(e[4] || '')}</div><div class="sub">Beat ${esc(e[5] || e[2])} in the final${e[0] < years[0] ? ' · podium only' : ''}</div></div>`; }).join('');
   const ET = {}; A.franchises.forEach(s0 => ET[s0.f] = earlyTitles(s0.f));
   const nTit = s0 => s0.titles.length + (ET[s0.f] || 0);
-  const rows = [...A.franchises].sort((a, b) => nTit(b) - nTit(a) || (b.w / (b.w + b.l || 1)) - (a.w / (a.w + a.l || 1)));
+  const rows = A.franchises.filter(s0 => s0.seasons.length).sort((a, b) => nTit(b) - nTit(a) || (b.w / (b.w + b.l || 1)) - (a.w / (a.w + a.l || 1)));
   const tbl = rows.map(s => `<tr><td>${FLH(s.f)}</td><td class="num">${rec(s.w, s.l, s.t)}</td><td class="num hm">${pct(s.w / ((s.w + s.l + s.t) || 1))}</td><td class="num">${n0(s.pf / Math.max(1, s.seasons.length))}</td><td class="num">${nTit(s) ? `<span class="tag gold">${nTit(s)}×</span>` : '–'}</td><td class="num hm">${s.playoffs}</td><td class="num hm">${rec(s.pw, s.pl)}</td>${A.franchises.some(x => x.lb) ? `<td class="num hm">${s.lb ? `${s.lb} · ${rec(s.lbw, s.lbl)}` : '–'}</td>` : ''}<td class="num hm">${pct(s.eff)}</td></tr>`).join('');
   const nT = A.trades.length;
   const pairs = Object.entries(A.partner).sort((a, b) => b[1] - a[1]);
   const [pk, pc] = pairs[0]; const [pa, pb] = pk.split('-').map(Number);
-  const allPairs = []; for (let a = 1; a <= 12; a++) for (let b = a + 1; b <= 12; b++) if (!A.partner[a + '-' + b]) allPairs.push([a, b]);
+  const allPairs = []; for (let a = 1; a <= NF; a++) for (let b = a + 1; b <= NF; b++) if (!A.partner[a + '-' + b]) allPairs.push([a, b]);
   const bb = A.bigBids[0];
   const tv = travel[0];
   const heist = [...A.trades].sort((a, b) => b.diff - a.diff)[0];
@@ -1316,7 +1318,7 @@ function viewPlayer(pid) {
   const fids = new Set(st.map(s => s.fid));
   const trades = st.filter(s => s.how.k === 'T').length;
   const pts = st.reduce((a, s) => a + s.pts, 0), starts = st.reduce((a, s) => a + s.starts, 0);
-  const chips = Array.from({ length: 12 }, (_, i) => { const f = i + 1, on = fids.has(f); return `<div class="chip${on ? ' on' : ''}" style="--fcol:${fcol(f)}" title="${esc(curTeam(f))} (${esc(owner(f))})">${on ? esc(owner(f).split(' ').map(w => w[0]).join('')) : ''}</div>`; }).join('');
+  const chips = Array.from({ length: NF }, (_, i) => { const f = i + 1, on = fids.has(f); return `<div class="chip${on ? ' on' : ''}" style="--fcol:${fcol(f)}" title="${esc(curTeam(f))} (${esc(owner(f))})">${on ? esc(owner(f).split(' ').map(w => w[0]).join('')) : ''}</div>`; }).join('');
   const rows = st.map(s => {
     const span = s.ey == null ? `${yr(s.sy)}–now` : (s.ey === s.sy ? `${yr(s.sy)}` : `${yr(s.sy)}–${String(yr(s.ey)).slice(2)}`);
     const [tn, own] = team(s.fid, s.sy); const now = curTeam(s.fid);
@@ -1509,11 +1511,11 @@ function viewTrades(focus) {
   if (tstate.sort === 'lop') list.sort((a, b) => b.diff - a.diff);
   if (tstate.sort === 'big') list.sort((a, b) => (b.g1.length + b.g2.length) - (a.g1.length + a.g2.length));
   // matrix
-  let mx = '<table class="matrix"><thead><tr><th></th>' + Array.from({ length: 12 }, (_, i) => `<th style="vertical-align:bottom"><div class="colh">${esc(short(i + 1))}</div><div class="colbar" style="background:${fcol(i + 1)}"></div></th>`).join('') + '</tr></thead><tbody>';
+  let mx = '<table class="matrix"><thead><tr><th></th>' + Array.from({ length: NF }, (_, i) => `<th style="vertical-align:bottom"><div class="colh">${esc(short(i + 1))}</div><div class="colbar" style="background:${fcol(i + 1)}"></div></th>`).join('') + '</tr></thead><tbody>';
   const maxP = Math.max(...Object.values(A.partner));
-  for (let a = 1; a <= 12; a++) {
+  for (let a = 1; a <= NF; a++) {
     mx += `<tr><th class="rowh"><span class="fdot" style="--fcol:${fcol(a)}"></span>${esc(shortH(a))}</th>`;
-    for (let b = 1; b <= 12; b++) {
+    for (let b = 1; b <= NF; b++) {
       if (a === b) { mx += '<td><span class="mc self"></span></td>'; continue; }
       const k = Math.min(a, b) + '-' + Math.max(a, b); const c = A.partner[k] || 0;
       const al = c ? (0.15 + 0.85 * c / maxP) : 0;
@@ -1529,7 +1531,7 @@ function viewTrades(focus) {
   <div class="grid2 tr-side">
     <section class="card pad"><h3>Who trades with whom</h3><p class="sub">Number of trades between each pair of franchises, labeled by current owner. Tap a square to see those trades.</p><div class="tbl" style="margin-top:10px">${mx}</div></section>
     <section class="card pad"><h3>Trade volume by season</h3><div class="bars" style="margin-top:10px">${years.map((y, yi) => { const c = A.trades.filter(t => t.yi === yi).length; const m = Math.max(...years.map((_, k) => A.trades.filter(t => t.yi === k).length)); return `<div class="bar"><span>${y}</span><span class="t"><i style="width:${c / m * 100}%"></i></span><span class="num">${c}</span></div>`; }).join('')}</div>
-    <h3 style="margin-top:18px">Most active traders</h3><ol class="list">${Array.from({ length: 12 }, (_, i) => i + 1).map(f => [f, A.trades.filter(t => t.f1 === f || t.f2 === f)]).sort((a, b) => b[1].length - a[1].length).slice(0, 6).map(([f, ts], i) => { const won = ts.filter(t => t.winner === f).length, lost = ts.filter(t => t.winner && t.winner !== f).length; return `<li><span><span class="rk">${i + 1}</span>${FSH(f)} <span class="owner">won ${won}, lost ${lost}</span></span><span class="v">${ts.length}</span></li>`; }).join('')}</ol></section>
+    <h3 style="margin-top:18px">Most active traders</h3><ol class="list">${Array.from({ length: NF }, (_, i) => i + 1).map(f => [f, A.trades.filter(t => t.f1 === f || t.f2 === f)]).sort((a, b) => b[1].length - a[1].length).slice(0, 6).map(([f, ts], i) => { const won = ts.filter(t => t.winner === f).length, lost = ts.filter(t => t.winner && t.winner !== f).length; return `<li><span><span class="rk">${i + 1}</span>${FSH(f)} <span class="owner">won ${won}, lost ${lost}</span></span><span class="v">${ts.length}</span></li>`; }).join('')}</ol></section>
   </div>
   <section class="card"><div class="pad controls">
     <label for="tyr">Season<select id="tyr">${yearOpts(tstate.yi)}</select></label>
@@ -1725,11 +1727,11 @@ function viewWaivers() {
   const tr = rows.sort((a, b) => b.spent - a.spent).map(r => `<tr><td>${FS(r.f, yi)}</td><td class="num">${money(r.spent)}</td><td class="num">${r.claims}</td><td class="num hm">${money(r.max)}</td><td class="num">${r.adds}</td><td class="num">${r.drops}</td><td class="num">${r.trades}</td></tr>`).join('');
   // spending heat by owner x season
   let heat = `<table class="heat"><thead><tr><th>Owner</th>${years.map(y => `<th class="num">'${String(y).slice(2)}</th>`).join('')}<th class="num">Total</th></tr></thead><tbody>`;
-  for (let f = 1; f <= 12; f++) { let tot = 0; heat += `<tr><td>${FSH(f)}</td>` + years.map((_, k) => { const s = A.faab[k][f].spent; tot += s; return `<td class="h" style="background:color-mix(in oklab, var(--accent) ${Math.round(s / maxSpent * 70)}%, transparent)">${s ? n0(s) : '·'}</td>`; }).join('') + `<td class="num"><b>${n0(tot)}</b></td></tr>`; }
+  for (let f = 1; f <= NF; f++) { let tot = 0; heat += `<tr><td>${FSH(f)}</td>` + years.map((_, k) => { const s = A.faab[k][f].spent; tot += s; return `<td class="h" style="background:color-mix(in oklab, var(--accent) ${Math.round(s / maxSpent * 70)}%, transparent)">${s ? n0(s) : '·'}</td>`; }).join('') + `<td class="num"><b>${n0(tot)}</b></td></tr>`; }
   heat += '</tbody></table>';
   const bt = A.bidTrend; const mx = Math.max(...bt.map(b => b.avg));
   const bars = bt.map(b => `<div class="bar"><span>${b.y}</span><span class="t"><i style="width:${mx ? b.avg / mx * 100 : 0}%"></i></span><span class="num">${money(b.avg.toFixed(2))}</span></div>`).join('');
-  const act = []; for (let f = 1; f <= 12; f++) { let m = 0; years.forEach((_, k) => { const r = A.faab[k][f]; m += r.claims + r.adds; }); act.push([f, m]); }
+  const act = []; for (let f = 1; f <= NF; f++) { let m = 0; years.forEach((_, k) => { const r = A.faab[k][f]; m += r.claims + r.adds; }); act.push([f, m]); }
   act.sort((a, b) => b[1] - a[1]);
   const noF = !A.bigBids.length;
   main.innerHTML = `<section><h2 class="sec">Waiver wire</h2><p class="lede">${noF ? 'Waiver claims' : 'Blind-bid claims'}, free agent adds, and what those pickups produced. A pickup counts as a hit once he starts ${A.HIT} or more games for the team that grabbed him.</p></section>
@@ -1764,7 +1766,7 @@ function rankChart(s) {
 function viewFranchises(f) {
   f = f || 8;
   const s = A.franchises[f - 1];
-  const sel = Array.from({ length: 12 }, (_, i) => i + 1).map(k => `<button class="pill" data-fsel="${k}" aria-pressed="${k === f}"><span class="fdot" style="--fcol:${fcol(k)};margin:0"></span>${esc(short(k))}</button>`).join('');
+  const sel = Array.from({ length: NF }, (_, i) => i + 1).map(k => `<button class="pill" data-fsel="${k}" aria-pressed="${k === f}"><span class="fdot" style="--fcol:${fcol(k)};margin:0"></span>${esc(short(k))}</button>`).join('');
   const seasonRows = s.seasons.map(r => {
     const c = A.champions[r.yi]; const b = A.playoff[r.yi].find(x => x.teams.includes(f));
     let post = '–'; const PS = s.post[r.yi]; const wlT = PS && PS.w + PS.l ? ` <span class="owner">${rec(PS.w, PS.l)}</span>` : '';
@@ -1775,7 +1777,7 @@ function viewFranchises(f) {
     return `<tr><td><b>${years[r.yi]}</b>${platformOf(r.yi) && raw.platform && new Set(Object.values(raw.platform)).size > 1 ? ` <span class="tag">${esc(platformOf(r.yi))}</span>` : ''}<div class="owner">${esc(team(f, r.yi)[0])}</div></td><td class="num">${rec(r.w, r.l, r.t)}</td><td class="num">${ord(r.rank)}</td><td class="num">${n1(r.pf)}</td><td class="num hm">${pct(r.eff)}</td><td>${post}</td></tr>`;
   }).reverse().join('');
   const names = s.names.map((n, i) => { const end = s.names[i + 1] ? years[s.names[i + 1].yi - 1] : null; return `<div class="lin"><b>${years[n.yi]}${end && end !== years[n.yi] ? '–' + String(end).slice(2) : ''}</b><div><div class="team">${esc(n.name)}</div><div class="owner">${esc(n.owner)}</div></div></div>`; }).join('');
-  const partners = Array.from({ length: 12 }, (_, i) => i + 1).filter(k => k !== f).map(k => [k, A.partner[Math.min(f, k) + '-' + Math.max(f, k)] || 0]).sort((a, b) => b[1] - a[1]);
+  const partners = Array.from({ length: NF }, (_, i) => i + 1).filter(k => k !== f).map(k => [k, A.partner[Math.min(f, k) + '-' + Math.max(f, k)] || 0]).sort((a, b) => b[1] - a[1]);
   const legends = A.legends[f - 1].top;
   const cur = (raw.ro[years[last]][f - 1] || '').split(',').filter(Boolean).map(p => S(p).find(x => x.fid === f && x.ey == null)).filter(Boolean).sort((a, b) => a.sy - b.sy || (a.sd ?? -1) - (b.sd ?? -1)).slice(0, 8);
   const kept = A.turnover[f - 1].kept;
@@ -1799,10 +1801,10 @@ function viewFranchises(f) {
 /* ---------- RIVALRIES ---------- */
 let rpair = null;
 function viewRivalries() {
-  let mx = '<table class="matrix"><thead><tr><th></th>' + Array.from({ length: 12 }, (_, i) => `<th style="vertical-align:bottom"><div class="colh">${esc(short(i + 1))}</div><div class="colbar" style="background:${fcol(i + 1)}"></div></th>`).join('') + '</tr></thead><tbody>';
-  for (let a = 1; a <= 12; a++) {
+  let mx = '<table class="matrix"><thead><tr><th></th>' + Array.from({ length: NF }, (_, i) => `<th style="vertical-align:bottom"><div class="colh">${esc(short(i + 1))}</div><div class="colbar" style="background:${fcol(i + 1)}"></div></th>`).join('') + '</tr></thead><tbody>';
+  for (let a = 1; a <= NF; a++) {
     mx += `<tr><th class="rowh"><span class="fdot" style="--fcol:${fcol(a)}"></span>${esc(shortH(a))}</th>`;
-    for (let b = 1; b <= 12; b++) {
+    for (let b = 1; b <= NF; b++) {
       if (a === b) { mx += '<td><span class="mc self"></span></td>'; continue; }
       const h = A.h2h[a + '-' + b] || { w: 0, l: 0, t: 0 }; const n = h.w + h.l + h.t; const p = n ? (h.w + h.t / 2) / n : .5;
       const c = p >= .5 ? `color-mix(in oklab, var(--win) ${Math.round((p - .5) * 160)}%, var(--soft))` : `color-mix(in oklab, var(--loss) ${Math.round((.5 - p) * 160)}%, var(--soft))`;
@@ -1812,7 +1814,7 @@ function viewRivalries() {
   }
   mx += '</tbody></table>';
   // biggest rivalries
-  const pairs = []; for (let a = 1; a <= 12; a++) for (let b = a + 1; b <= 12; b++) { const h = A.h2h[a + '-' + b]; if (h) pairs.push({ a, b, h, n: h.w + h.l + h.t, po: h.games.filter(g => g.kind === 'playoff').length }); }
+  const pairs = []; for (let a = 1; a <= NF; a++) for (let b = a + 1; b <= NF; b++) { const h = A.h2h[a + '-' + b]; if (h) pairs.push({ a, b, h, n: h.w + h.l + h.t, po: h.games.filter(g => g.kind === 'playoff').length }); }
   const lopsided = [...pairs].filter(p => p.n >= 6).sort((x, y) => Math.abs(y.h.w - y.h.l) - Math.abs(x.h.w - x.h.l)).slice(0, 6);
   const playoffRiv = [...pairs].filter(p => p.po).sort((x, y) => y.po - x.po).slice(0, 6);
   let detail = '<p class="sub">Tap any square to see every game between those two franchises.</p>';
@@ -1857,7 +1859,7 @@ function buildFacts() {
   const fr = A.franchises;
   const wk = (yi, w) => `${years[yi]}, week ${w}`;
   // rivalries
-  const pairs = []; for (let a = 1; a <= 12; a++) for (let b = a + 1; b <= 12; b++) { const h = A.h2h[a + '-' + b]; if (h) pairs.push({ a, b, h, n: h.w + h.l + h.t }); }
+  const pairs = []; for (let a = 1; a <= NF; a++) for (let b = a + 1; b <= NF; b++) { const h = A.h2h[a + '-' + b]; if (h) pairs.push({ a, b, h, n: h.w + h.l + h.t }); }
   pairs.filter(p => p.n >= 6).sort((x, y) => Math.abs(y.h.w - y.h.l) / y.n - Math.abs(x.h.w - x.h.l) / x.n).slice(0, 4).forEach(p => {
     const [W, Lo, w, l] = p.h.w >= p.h.l ? [p.a, p.b, p.h.w, p.h.l] : [p.b, p.a, p.h.l, p.h.w];
     const po = A.h2h[W + '-' + Lo].games.filter(g => g.kind === 'playoff'); const pw = po.filter(g => g.sx > g.sy).length;
@@ -1902,18 +1904,18 @@ function buildFacts() {
   const bb = A.bigBids[0]; if (bb) { const out = bb.end && bb.end.k === 'T' && bb.ed - bb.sd <= 3 ? `then traded him away ${bb.ed - bb.sd <= 1 ? 'the next day' : 'within days'}` : `and got ${n0(bb.pts)} started points from him`; add('Waiver Wire', `${FN(bb.fid, bb.sy)} spent a record <b>${money(A.bid(bb))}</b> to claim ${P(bb.pid)} in ${yr(bb.sy)}, ${out}.`); }
   const free = A.bestPickups.find(s => A.bid(s) === 0); if (free) add('Waiver Wire', `${P(free.pid)} cost ${FN(free.fid, free.sy)} nothing in ${yr(free.sy)} and returned <b>${n0(free.pts)} started points</b>.`);
   const bt = A.bidTrend.filter(b => b.n); if (bt.length > 1) add('Waiver Wire', `The average winning bid went from <b>${money(bt[0].avg.toFixed(2))}</b> in ${bt[0].y} to <b>${money(bt[bt.length - 1].avg.toFixed(2))}</b> in ${bt[bt.length - 1].y}.`);
-  const tot = []; for (let f = 1; f <= 12; f++) tot.push([f, years.reduce((a, _, k) => a + A.faab[k][f].spent, 0)]); tot.sort((a, b) => b[1] - a[1]);
-  if (tot[0][1] > 0) add('Waiver Wire', `${FA(tot[0][0])} has spent <b>$${n0(tot[0][1])}</b> in FAAB all-time, the most in the league. ${FA(tot[11][0])} has spent the least at $${n0(tot[11][1])}.`);
+  const tot = []; for (let f = 1; f <= NF; f++) tot.push([f, years.reduce((a, _, k) => a + A.faab[k][f].spent, 0)]); tot.sort((a, b) => b[1] - a[1]);
+  if (tot[0][1] > 0) add('Waiver Wire', `${FA(tot[0][0])} has spent <b>$${n0(tot[0][1])}</b> in FAAB all-time, the most in the league. ${FA(tot[tot.length - 1][0])} has spent the least at $${n0(tot[tot.length - 1][1])}.`);
   const hr = [...A.hitRate].filter(h => h.n >= 30).sort((a, b) => b.rate - a.rate)[0]; if (hr) add('Waiver Wire', `${pct(hr.rate)} of ${FA(hr.f)}'s pickups turned into ${A.HIT}+ game starters, the best hit rate in the league.`);
   const busy = [...A.hitRate].sort((a, b) => b.n - a.n)[0]; add('Waiver Wire', `${FA(busy.f)} has made <b>${busy.n} pickups</b> since ${years[0]}, the most in the league.`);
   // trades
   const pr = Object.entries(A.partner).sort((a, b) => b[1] - a[1])[0]; const [pa, pb] = pr[0].split('-').map(Number); add('Trades', `${FA(pa)} and ${FA(pb)} have made <b>${pr[1]} trades</b> with each other, the most of any pair.`);
-  const never = []; for (let a = 1; a <= 12; a++) for (let b = a + 1; b <= 12; b++) if (!A.partner[a + '-' + b]) never.push([a, b]);
+  const never = []; for (let a = 1; a <= NF; a++) for (let b = a + 1; b <= NF; b++) if (!A.partner[a + '-' + b]) never.push([a, b]);
   if (never.length) add('Trades', `<b>${never.length}</b> ${never.length === 1 ? 'pair of owners has' : 'pairs of owners have'} never made a trade with each other, including ${FA(never[0][0])} and ${FA(never[0][1])}.`);
-  const trec = []; for (let f = 1; f <= 12; f++) { const ts = A.trades.filter(t => (t.f1 === f || t.f2 === f) && !t.open && (t.p1 + t.p2) > 0); trec.push([f, ts.filter(t => t.winner === f).length, ts.filter(t => t.winner && t.winner !== f).length]); }
+  const trec = []; for (let f = 1; f <= NF; f++) { const ts = A.trades.filter(t => (t.f1 === f || t.f2 === f) && !t.open && (t.p1 + t.p2) > 0); trec.push([f, ts.filter(t => t.winner === f).length, ts.filter(t => t.winner && t.winner !== f).length]); }
   trec.sort((a, b) => (b[1] - b[2]) - (a[1] - a[2]));
-  add('Trades', `By points received, ${FA(trec[0][0])} has the best trade record in the league at <b>${trec[0][1]}–${trec[0][2]}</b>. ${FA(trec[11][0])} is ${trec[11][1]}–${trec[11][2]}.`);
-  const busiestSeason = []; years.forEach((y, yi) => { for (let f = 1; f <= 12; f++) busiestSeason.push([f, yi, A.faab[yi][f].trades]); }); busiestSeason.sort((a, b) => b[2] - a[2]);
+  add('Trades', `By points received, ${FA(trec[0][0])} has the best trade record in the league at <b>${trec[0][1]}–${trec[0][2]}</b>. ${FA(trec[trec.length - 1][0])} is ${trec[trec.length - 1][1]}–${trec[trec.length - 1][2]}.`);
+  const busiestSeason = []; years.forEach((y, yi) => { for (let f = 1; f <= NF; f++) busiestSeason.push([f, yi, A.faab[yi][f].trades]); }); busiestSeason.sort((a, b) => b[2] - a[2]);
   add('Trades', `${FN(busiestSeason[0][0], busiestSeason[0][1])} made <b>${busiestSeason[0][2]} trades</b> in ${years[busiestSeason[0][1]]}, the most by anyone in a single league year.`);
   const heist = [...A.trades].filter(t => t.p1 && t.p2).sort((a, b) => b.diff - a.diff)[0]; if (heist) add('Trades', `The most lopsided trade where both sides got points: ${FN(heist.winner, heist.yi, heist.d)} came out <b>${n0(heist.diff)} points</b> ahead in ${yr(heist.yi)}. <button class="tlink" data-t="${heist.i}">See the trade</button>`);
   const jr = A.journeys[0]; if (jr) add('Draft Picks', `${FN(jr.orig, A.trades[jr.hops[0].tr].yi)}'s ${jr.y} ${ord(jr.rd)}-round pick changed hands <b>${jr.hops.length} times</b> before it was used${jr.pid ? `, and became ${P(jr.pid)}` : ''}.`);
@@ -2270,6 +2272,8 @@ function crossFacts(add) {
 const TABS = ['overview', 'titles', 'postseason', 'week', 'preview', 'facts', 'players', 'trades', 'picks', 'future', 'waivers', 'franchises', 'rivalries', 'records', 'crossover'].filter(t => t !== 'crossover' || (raw.cross && raw.cross.leagues && raw.cross.leagues.length > 1));
 if (!raw.cross) TABS.splice(TABS.indexOf('crossover'), 1);
 if (!raw.sched) { TABS.splice(TABS.indexOf('week'), 1); TABS.splice(TABS.indexOf('preview'), 1); }
+// redraft leagues have no dynasty future to project
+if (raw.redraft) TABS.splice(TABS.indexOf('future'), 1);
 // six top-level groups; the ones with several pages get a row of sub-tabs
 const ICON = {
   week: '<path d="M4 6.5h16v13H4z M4 10.5h16 M8.5 4v4 M15.5 4v4" />',
@@ -2354,7 +2358,7 @@ const q = $('#q'), ul = $('#sugg'), combo = $('#combo');
 let hits = [], sel = -1;
 const slug = t => String(t).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
 // people: every owner who has run a franchise, matched by full name or first name
-const PEOPLE = (() => { const m = new Map(); years.forEach((_, yi) => { for (let f = 1; f <= 12; f++) { const o = owner(f, yi); if (!o) continue; const r = m.get(o) || { o, f, yi, ys: [] }; r.f = f; r.yi = yi; r.ys.push(yi); m.set(o, r); } }); return [...m.values()]; })();
+const PEOPLE = (() => { const m = new Map(); years.forEach((_, yi) => { for (let f = 1; f <= NF; f++) { const o = owner(f, yi); if (!o) continue; const r = m.get(o) || { o, f, yi, ys: [] }; r.f = f; r.yi = yi; r.ys.push(yi); m.set(o, r); } }); return [...m.values()]; })();
 const firstCount = {}; PEOPLE.forEach(p => { const k = p.o.split(' ')[0].toLowerCase(); firstCount[k] = (firstCount[k] || 0) + 1; });
 const findPeople = t => { const out = []; PEOPLE.forEach(p => { const full = p.o.toLowerCase(), first = full.split(' ')[0], lastN = full.split(' ').slice(-1)[0]; const re = w => new RegExp(`(^|[^a-z])${w.replace(/[^a-z]/g, '')}('s)?([^a-z]|$)`); let at = -1; const m1 = t.indexOf(full); if (m1 >= 0) at = m1; else if (re(first).test(t) && firstCount[first] === 1) at = t.search(re(first)); else if (lastN.length > 3 && full.split(' ').length > 1 && re(lastN).test(t)) at = t.search(re(lastN)); if (at >= 0) out.push({ ...p, at }); }); return out.sort((a, b) => a.at - b.at); };
 const sh = o => { const p = o.split(' ').filter((x, i) => i === 0 || !/^["“(']/.test(x)); return p.length > 1 ? `${p[0]} ${p[p.length - 1][0]}.` : o; };
