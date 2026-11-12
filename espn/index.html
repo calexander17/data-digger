@@ -1093,9 +1093,21 @@ function previewNote(n, nm, pc, lgName) {
 }
 // ---- trade grades: an instant grade for each side the week a trade happens, and a hindsight grade as the points come in.
 // Two instant grades per side. Goal grade judges the trade against that team's window: a contender on its title odds,
-// a rebuilder on value two to four seasons out (age curves for players, this league's draft history for picks), a team
+// a rebuilder on value two to four seasons out (fitted age curves for players, this league's draft history for picks), a team
 // in the middle on lineup points now and later. Value grade is a neutral read of what each side's assets are worth. Hindsight grade = points over replacement
 // each side has actually gotten since the trade, the same measure the Trades tab uses.
+// How much of a player's points over replacement is left 1 to 5 seasons later, by position and age now (<23, 23-24,
+// 25-26, 27-28, 29-30, 31-32, 33+). Fitted on League of Champions, Titans and Flex Luger seasons 2018-2026, counting a
+// player who stopped scoring as zero, then smoothed so it never rises with age or time. Backtested on 556 past trades.
+const TG_K = {"QB":[[0.68,0.84,0.84,0.66,0.66,0.52,0.52],[0.6,0.69,0.69,0.66,0.51,0.51,0.39],[0.53,0.68,0.53,0.53,0.51,0.35,0.27],[0.47,0.6,0.4,0.4,0.45,0.24,0.19],[0.41,0.53,0.31,0.31,0.4,0.17,0.13]],"RB":[[0.87,0.85,0.85,0.61,0.61,0.61,0.61],[0.84,0.83,0.6,0.45,0.45,0.45,0.45],[0.74,0.83,0.44,0.4,0.4,0.4,0.4],[0.64,0.73,0.32,0.35,0.35,0.35,0.35],[0.56,0.64,0.23,0.31,0.31,0.31,0.31]],"WR":[[1.04,0.95,0.8,0.8,0.65,0.63,0.63],[1.04,0.88,0.64,0.52,0.48,0.48,0.48],[1.04,0.77,0.44,0.37,0.34,0.34,0.34],[0.92,0.67,0.3,0.27,0.24,0.24,0.24],[0.81,0.59,0.21,0.19,0.17,0.17,0.17]],"TE":[[0.95,0.9,0.73,0.71,0.71,0.71,0.71],[0.82,0.84,0.57,0.57,0.57,0.52,0.52],[0.46,0.55,0.49,0.49,0.49,0.42,0.42],[0.26,0.36,0.42,0.42,0.42,0.34,0.34],[0.14,0.24,0.36,0.36,0.36,0.27,0.27]],"IDP":[[0.53,0.66,0.54,0.54,0.54,0.5,0.31],[0.53,0.52,0.48,0.46,0.46,0.36,0.31],[0.38,0.44,0.31,0.31,0.31,0.21,0.2],[0.23,0.38,0.2,0.2,0.2,0.12,0.11],[0.14,0.33,0.13,0.14,0.14,0.07,0.06]]};
+// value grade letters by the value edge in units of the league's weekly score spread; in the backtest a side with an
+// edge of 2.5+ got more points about 58% of the time, 6.3+ about 65%, and smaller edges were a coin flip
+// players scoring below replacement: average points over replacement 1 to 5 seasons later, as a share of replacement,
+// by how close they are now (under 75% of replacement, or 75-100%) and age (<23, 23-24, 25-26, 27+). This is the
+// breakout chance that makes young depth players worth something in a rebuild. Same seasons, smoothed.
+const TG_B = {"QB":[[[0.047,0.044,0.025,0.016,0.006],[0.005,0.006,0.011,0.016,0.021],[0.016,0.021,0.013,0.01,0.0],[0.018,0.019,0.016,0.013,0.01]],[[0.054,0.042,0.029,0.006,0.0],[0.042,0.052,0.034,0.043,0.028],[0.046,0.062,0.073,0.081,0.074],[0.024,0.021,0.013,0.011,0.008]]],"RB":[[[0.083,0.089,0.125,0.106,0.108],[0.026,0.026,0.038,0.028,0.029],[0.019,0.013,0.005,0.0,0.0],[0.004,0.004,0.003,0.002,0.002]],[[0.035,0.094,0.127,0.207,0.205],[0.115,0.095,0.063,0.037,0.03],[0.101,0.072,0.033,0.004,0.0],[0.024,0.017,0.009,0.002,0.001]]],"WR":[[[0.081,0.074,0.072,0.071,0.077],[0.017,0.018,0.017,0.011,0.006],[0.015,0.013,0.008,0.003,0.0],[0.005,0.003,0.0,0.0,0.0]],[[0.127,0.18,0.188,0.17,0.111],[0.12,0.099,0.084,0.044,0.036],[0.067,0.055,0.036,0.016,0.007],[0.007,0.005,0.003,0.0,0.0]]],"TE":[[[0.026,0.03,0.084,0.071,0.087],[0.005,0.014,0.017,0.02,0.014],[0.012,0.012,0.011,0.01,0.008],[0.01,0.01,0.007,0.006,0.004]],[[0.022,0.023,0.023,0.011,0.004],[0.097,0.087,0.066,0.023,0.001],[0.029,0.05,0.053,0.041,0.016],[0.03,0.022,0.011,0.002,0.0]]],"IDP":[[[0.035,0.024,0.016,0.01,0.013],[0.026,0.025,0.037,0.033,0.038],[0.032,0.029,0.017,0.01,0.004],[0.007,0.007,0.003,0.003,0.001]],[[0.079,0.084,0.081,0.058,0.041],[0.053,0.049,0.048,0.049,0.054],[0.035,0.035,0.037,0.027,0.022],[0.025,0.02,0.009,0.006,0.005]]]};
+const TG_VLET = [[20, 'A+'], [12, 'A'], [6.3, 'A-'], [2.5, 'B+'], [0.8, 'B'], [-0.8, 'C'], [-2.5, 'C-'], [-6.3, 'D+'], [-12, 'D'], [-20, 'D-'], [-Infinity, 'F']];
+const tgVal = m => TG_VLET.find(([t]) => m >= t)[1];
 const TG_LETTERS = [[2, 'A+'], [1.2, 'A'], [0.7, 'A-'], [0.4, 'B+'], [0.2, 'B'], [0.07, 'B-'], [-0.07, 'C'], [-0.2, 'C-'], [-0.4, 'D+'], [-0.7, 'D'], [-1.2, 'D-'], [-Infinity, 'F']];
 const tgLetter = u => TG_LETTERS.find(([t]) => u >= t)[1];
 const tgKey = t => `${t.d}|${t.f1}|${t.f2}|${[...t.g1].sort().join(',')}|${[...t.g2].sort().join(',')}`;
@@ -1120,24 +1132,20 @@ function tradeGrades(raw, L, A, K) {
   const psC = (raw.ps || {})[cur] || {}, psP = (raw.ps || {})[cur - 1] || {};
   const R = A.draftReport; const exp = R ? R.expRate : [];
   const rookieSlot = {}; if (R) R.picks.filter(p => p.y === cur).forEach(p => rookieSlot[p.pid] = p.overall);
+  // scoring rate now: this season, plus last season at 60% weight per game (the blend that predicted best in the backtest)
   const ppgNow = pid => {
-    const c = psC[pid], p = psP[pid];
-    const pc = c && c[1] ? c[0] / c[1] : null, pp = p && p[1] >= 3 ? p[0] / p[1] : null;
-    if (pc != null && pp != null) { const w = c[1] / (c[1] + 4); return w * pc + (1 - w) * pp; }
-    if (pc != null) return c[1] >= 3 ? pc : pc * 0.7 + (rookieSlot[pid] ? (exp[rookieSlot[pid]] || 0) / lrw * 0.3 : 0);
-    if (pp != null) return pp * 0.85;
-    if (rookieSlot[pid]) return (exp[rookieSlot[pid]] || 0) / lrw;
-    return 0;
+    const c = psC[pid], p = psP[pid]; let num = 0, den = 0;
+    if (c && c[1]) { num += c[0]; den += c[1]; } if (p && p[1] >= 3) { num += p[0] * 0.6; den += p[1] * 0.6; }
+    const rk = rookieSlot[pid] ? (exp[rookieSlot[pid]] || 0) / lrw : 0;
+    if (!den) return rk; const v = num / den; return den < 4 ? v * 0.75 + rk * 0.25 : v;
   };
-  const step = (p, a) => {
-    if (a == null) return 1;
-    if (p === 'QB') return a < 25 ? 1.08 : a < 31 ? 1.02 : a < 35 ? 1 : a < 38 ? 0.9 : 0.75;
-    if (p === 'RB') return a < 23 ? 1.1 : a < 26 ? 1.02 : a < 27 ? 0.95 : a < 28 ? 0.88 : a < 29 ? 0.82 : 0.72;
-    if (p === 'WR') return a < 24 ? 1.1 : a < 28 ? 1.03 : a < 30 ? 0.97 : a < 31 ? 0.9 : 0.8;
-    if (p === 'TE') return a < 25 ? 1.12 : a < 29 ? 1.03 : a < 31 ? 0.95 : 0.85;
-    return a < 25 ? 1.04 : a < 29 ? 1 : a < 31 ? 0.92 : a < 33 ? 0.85 : 0.75;
-  };
-  const projC = {}; const proj = (pid, y) => { const k = pid + '|' + y; if (projC[k] != null) return projC[k]; let v = ppgNow(pid); const p = pos(pid); const yr1 = (bio[pid] || [])[1] === cur; for (let k2 = cur; k2 < y; k2++) { v *= step(p, ageAt(pid, k2)); if (yr1 && k2 === cur) v *= 1.08; } return projC[k] = v; };
+  const POSN = p => ({ DE: 'DL', DT: 'DL', CB: 'DB', S: 'DB' }[p] || p);
+  const kGrp = p => ['DL', 'LB', 'DB'].includes(POSN(p)) ? 'IDP' : POSN(p);
+  const ageB = a => a < 23 ? 0 : a < 25 ? 1 : a < 27 ? 2 : a < 29 ? 3 : a < 31 ? 4 : a < 33 ? 5 : 6;
+  const RV = (raw.repl && raw.repl[cur] && raw.repl[cur].r) || {};
+  const rv = p => RV[POSN(p)] != null ? RV[POSN(p)] : rp(p); // the league's own replacement level by position
+  // projection: points over replacement shrink by the fitted share for that position and age; below replacement, a slow fade
+  const projC = {}; const proj = (pid, y) => { const h = y - cur; const ck = pid + '|' + h; if (projC[ck] != null) return projC[ck]; const v = ppgNow(pid); if (h <= 0) return projC[ck] = v; const p = pos(pid); const tab = TG_K[kGrp(p)]; const r = rv(p); const a = ageAt(pid, cur); const k = tab ? tab[Math.min(5, h) - 1][ageB(a == null ? 26 : a)] : Math.pow(0.7, h); if (v > r) return projC[ck] = r + (v - r) * k; const tb = TG_B[kGrp(p)]; if (tb && r > 0) { const ab = a == null ? 2 : a < 23 ? 0 : a < 25 ? 1 : a < 27 ? 2 : 3; const sh = tb[v / r >= 0.75 ? 1 : 0][ab][Math.min(5, h) - 1]; if (sh > 0) return projC[ck] = r * (1 + sh); } return projC[ck] = v * Math.pow(0.85, h); };
   // replacement level: a deep bench player, the one ranked about 1.5 starting lineups' worth down the league's rostered players
   const repl = (() => { const v = []; for (let f = 1; f <= F; f++) v.push(...ro[f].map(ppgNow)); v.sort((a, b) => b - a); return v.length ? (v[Math.min(v.length - 1, Math.round(F * S * 1.5))] || 0) : 5; })();
   // best lineup a roster can field in season y, weekly points (empty or weak slots get a waiver-wire replacement)
@@ -1167,12 +1175,12 @@ function tradeGrades(raw, L, A, K) {
   const replPos = (() => { const nT = Math.max(1, Object.keys(stCount).length); const out = {}; const byPos = {}; for (let f = 1; f <= F; f++) ro[f].forEach(p => (byPos[pos(p)] = byPos[pos(p)] || []).push(ppgNow(p)));
     Object.entries(byPos).forEach(([p, v]) => { const starters = Object.entries(stPos).filter(([k]) => k.split('|')[1] === p).reduce((t, [, n]) => t + n, 0) / nT; if (!starters) { out[p] = Infinity; return; } v.sort((a, b) => b - a); out[p] = v[Math.min(v.length - 1, Math.round(F * starters * 1.5))] || 0; }); return out; })();
   const rp = p => replPos[p] != null ? replPos[p] : repl;
-  const cvx = s => s <= 0 ? 0 : Math.pow(s, 1.5) / Math.sqrt(Math.max(3, repl));
+  const cvx = s => s <= 0 ? 0 : Math.pow(s, 1.25); // a small star premium; 1 to 1.5 all backtested about the same
   const weeksIn = k => k === 0 ? remW : lrw;
   const assetYear = (a, k) => {
     const y = cur + k; const pk = pickInfo(a);
-    if (pk) { if (pk.y <= lastDraft || pk.y > y) return 0; const pool = poolFor(pk.overall); const rm = ramp(y - pk.y); if (!pool.length) return cvx((exp[Math.round(pk.overall)] || 0) / lrw * rm - repl); return pool.reduce((t, x) => t + cvx(x.v * rm - rp(x.pos)), 0) / pool.length; }
-    return isP(a) ? cvx(proj(a, y) - rp(pos(a))) : 0;
+    if (pk) { if (pk.y <= lastDraft || pk.y > y) return 0; const pool = poolFor(pk.overall); const rm = ramp(y - pk.y); if (!pool.length) return cvx((exp[Math.round(pk.overall)] || 0) / lrw * rm - repl); return pool.reduce((t, x) => t + cvx(x.v * rm - rv(x.pos)), 0) / pool.length; }
+    return isP(a) ? cvx(proj(a, y) - rv(pos(a))) : 0;
   };
   // each asset is counted over five seasons of its own life: a player from now, a pick from the year it is drafted,
   // so a 2029 pick is not cut short just because it starts later
@@ -1181,7 +1189,7 @@ function tradeGrades(raw, L, A, K) {
   const REBUILD = k => (k === 0 ? 0 : k === 1 ? 0.6 : Math.pow(0.92, k - 2)) * fw; // a rebuilder plays for two to four seasons out
   // a rebuilder wants youth: players in their late twenties and older are worth less to him than to a contender,
   // since he will not be good again until they have aged; draft picks count as the youngest assets there are
-  const ageW = a => { if (pickInfo(a)) return 1.15; const g = ageAt(a, cur); if (g == null) return 0.9; return g < 25 ? 1.15 : g < 27 ? 1 : g < 29 ? 0.8 : g < 31 ? 0.55 : 0.35; };
+  const ageW = a => { if (pickInfo(a)) return 1.1; const g = ageAt(a, cur); if (g == null) return 0.9; return g < 25 ? 1.1 : g < 27 ? 1 : g < 29 ? 0.9 : g < 31 ? 0.75 : 0.6; };
   const AV = (a, wf) => span(a).reduce((t, k) => t + assetYear(a, k) * weeksIn(k) * wf(k), 0);
   const sum = (list, wf, aw) => list.reduce((t, a) => t + AV(a, wf) * (aw ? ageW(a) : 1), 0);
   // each team's window, from its playoff and title odds now
@@ -1192,7 +1200,7 @@ function tradeGrades(raw, L, A, K) {
     const before = [...new Set(after.filter(p => !got.includes(p)).concat(gave.filter(isP)))];
     const dNow = lineup(after, cur) - lineup(before, cur);
     const fut = [1, 2, 3].map(k => lineup(after, cur + k) - lineup(before, cur + k));
-    const assets = list => list.map(a => { const k = pickInfo(a); const v = Math.round(AV(a, NEUTRAL)); if (k) return { a, pick: k, v }; if (isP(a)) return { a, pid: a, pos: pos(a), ppg: r1(ppgNow(a)), age: ageAt(a, cur) != null ? Math.floor(ageAt(a, cur)) : null, next: r1(proj(a, cur + 1)), in3: r1(proj(a, cur + 3)), v }; return { a, other: true, v: 0 }; });
+    const assets = list => list.map(a => { const k = pickInfo(a); const v = Math.round(AV(a, NEUTRAL)); if (k) return { a, pick: k, v }; if (isP(a)) return { a, pid: a, pos: pos(a), ppg: r1(ppgNow(a)), age: ageAt(a, cur) != null ? Math.floor(ageAt(a, cur)) : null, next: ppgNow(a) > rv(pos(a)) ? r1(proj(a, cur + 1)) : null, in3: ppgNow(a) > rv(pos(a)) ? r1(proj(a, cur + 3)) : null, below: ppgNow(a) <= rv(pos(a)), v }; return { a, other: true, v: 0 }; });
     return { f, gotRaw: got, gaveRaw: gave, got: assets(got), gave: assets(gave), dNow, fut, window: windowOf(f) };
   };
   const grade = t => {
@@ -1207,8 +1215,9 @@ function tradeGrades(raw, L, A, K) {
       if (s.window === 'contender') { const dT = s.odds ? s.odds.title[1] - s.odds.title[0] : 0; g = dT * TV + 0.35 * fw * futL; s.basis = 'title odds now, a little for next seasons'; }
       else if (s.window === 'rebuilder') { g = sum(s.gotRaw, REBUILD, true) - sum(s.gaveRaw, REBUILD, true); s.basis = 'value two to four seasons out, with youth counting extra'; }
       else { g = s.dNow * remW * (0.25 + (o0 ? o0.po : 0.5)) + fw * futL; s.basis = fw ? 'this season weighted by playoff odds, plus the next three' : 'this season, weighted by playoff odds'; }
-      s.goalV = Math.round(g); s.goal = tgLetter(g / (K.sd * 3));
-      s.valueV = Math.round(s.valueV); s.value = tgLetter(s.valueV / (K.sd * 3));
+      s.goalV = Math.round(g); s.goal = s.window === 'rebuilder' ? tgVal(g / K.sd) : tgLetter(g / (K.sd * 3));
+      s.edge = r1(s.valueV / K.sd); s.valueV = Math.round(s.valueV); s.value = tgVal(s.edge);
+      s.conf = Math.abs(s.edge) >= 6.3 ? 65 : Math.abs(s.edge) >= 2.5 ? 58 : null;
       s.grade = s.goal;
       s.dNow = r1(s.dNow); s.fut = s.fut.map(r1); delete s.gotRaw; delete s.gaveRaw;
     });
@@ -2129,7 +2138,7 @@ function viewWeek() {
   const WINL = { contender: 'contender', rebuilder: 'rebuilder', middle: 'middle', out: 'out of the race' };
   const gSide = (c, f, i, x) => { const yi = years.indexOf(c.y) >= 0 ? years.indexOf(c.y) : last; if (Array.isArray(x)) return `<span>${FS(f, yi)} ${gTag(x[i])}</span>`; return `<span style="display:grid;gap:2px"><span>${FS(f, yi)} <span class="owner">${esc(WINL[x.win[i]] || '')}</span></span><span class="owner">Goal ${gTag(x.g[i])} Value ${gTag(x.v[i])}</span></span>`; };
   const gList = c => c && c.grades && Object.keys(c.grades).length ? `<ul class="list" style="margin-top:8px">${Object.entries(c.grades).map(([k, g]) => { const [, f1, f2] = k.split('|').map(Number); return `<li>${gSide(c, f1, 0, g)}${gSide(c, f2, 1, g)}</li>`; }).join('')}</ul>` : '';
-  const tradesHTML = tcol ? `<section class="card pad" id="wk-trades"><div class="eyebrow">${tcol.y} · week ${tcol.w} · trade grades</div><h3>Trade grades</h3><p class="sub">Two grades for each side. The goal grade judges the trade against the team's window: contenders on their title odds, rebuilders on value two to four seasons out with youth counting extra, everyone else on lineup points now and later. The value grade asks which side simply got more, with picks valued by what this league's past drafts produced at that slot. Earlier trades get regraded on the points each side has actually gotten.</p>${gList(tcol)}<div class="column">${colP(tcol.text)}</div>${tOld.length ? `<details style="margin-top:10px"><summary>Earlier trade columns (${tOld.length})</summary>${tOld.map(r => `<div style="margin-top:12px"><div class="eyebrow">${r.y} · week ${r.w}</div>${gList(r)}<div class="column">${colP(r.text)}</div></div>`).join('')}</details>` : ''}</section>` : '';
+  const tradesHTML = tcol ? `<section class="card pad" id="wk-trades"><div class="eyebrow">${tcol.y} · week ${tcol.w} · trade grades</div><h3>Trade grades</h3><p class="sub">Two grades for each side. The goal grade judges the trade against the team's window: contenders on their title odds, rebuilders on value two to four seasons out with youth counting extra, everyone else on lineup points now and later. The value grade asks which side simply got more, using aging curves fitted to past seasons in these leagues and picks valued by what this league's past drafts produced at that slot. Tested on about 550 past trades, it picked the side that ended up with more points about 60% of the time, so it is a lean, not a verdict. Earlier trades get regraded on the points each side has actually gotten.</p>${gList(tcol)}<div class="column">${colP(tcol.text)}</div>${tOld.length ? `<details style="margin-top:10px"><summary>Earlier trade columns (${tOld.length})</summary>${tOld.map(r => `<div style="margin-top:12px"><div class="eyebrow">${r.y} · week ${r.w}</div>${gList(r)}<div class="column">${colP(r.text)}</div></div>`).join('')}</details>` : ''}</section>` : '';
   const nav = [['wk-recap', 'Recap'], ['wk-moves', 'Moves'], tcol ? ['wk-trades', 'Trade grades'] : null, ['wk-power', 'Power rankings'], K.luck && K.luck.rows.length ? ['wk-luck', 'Luck report'] : null, K.odds ? ['wk-odds', 'Playoff odds'] : null, K.preview.length ? ['wk-preview', `Week ${K.nextW} preview`] : null].filter(Boolean);
   const gameCard = g => { const aw = g.sa > g.sb, bw = g.sb > g.sa; const side = (f, s, win) => `<div style="display:flex;justify-content:space-between;gap:10px;align-items:baseline;${win ? 'font-weight:700' : 'color:var(--muted)'}"><span>${FL(f, last, false)}</span><span class="big" style="font-size:20px">${n1(s)}</span></div>`; return `<div class="card pad" style="display:grid;gap:6px;border-left:5px solid ${fcol(aw ? g.a : g.b)}">${side(g.a, g.sa, aw)}${side(g.b, g.sb, bw)}${g.reg ? '' : '<span class="tag" style="justify-self:start">Playoffs</span>'}</div>`; };
   const sup = (eb, html) => html ? `<div class="fact"><div class="eyebrow">${eb}</div><div>${html}</div></div>` : '';
