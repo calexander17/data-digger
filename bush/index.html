@@ -1520,7 +1520,7 @@ let TGc; const tgRows = () => {
   let G = null; try { if (typeof tradeGrades === 'function') G = tradeGrades(raw, L, A, wkData()); } catch (e) {}
   const hind = {}; (G ? G.hind : []).forEach(h => hind[h.key] = h);
   const byKey = {}; A.trades.forEach(t => byKey[tgKey(t)] = t);
-  const rows = []; cols.forEach(c => Object.entries(c.grades).forEach(([k, g]) => { const t = byKey[k]; if (t && !Array.isArray(g)) rows.push({ t, g, y: c.y, w: c.w, h: hind[k] }); }));
+  const rows = []; cols.forEach(c => Object.entries(c.grades).forEach(([k, g]) => { const t = byKey[k]; if (t && !Array.isArray(g)) rows.push({ t, g, y: c.y, w: c.w, h: hind[k], col: c }); }));
   return (TGc = rows.sort((a, b) => b.t.d - a.t.d));
 };
 const tgTradeHTML = (r, tight) => {
@@ -2156,13 +2156,13 @@ function viewWeek() {
   const recaps = (raw.recaps || []).filter(r => (!r.kind || r.kind === 'recap') && r.key === (raw.crossKey || r.key)).sort((a, b) => b.y - a.y || b.w - a.w);
   const latest = recaps.find(r => r.y === y && r.w === K.W);
   // trade grades column: instant grades for the week's trades, saved with the column, plus hindsight grades in the text
-  const tcols = (raw.recaps || []).filter(r => r.kind === 'trades' && r.key === (raw.crossKey || r.key)).sort((a, b) => b.y - a.y || b.w - a.w);
+  const tcols = (raw.recaps || []).map((r, i) => [r, i]).filter(([r]) => r.kind === 'trades' && r.key === (raw.crossKey || r.key)).sort((a, b) => b[0].y - a[0].y || b[0].w - a[0].w || b[1] - a[1]).map(([r]) => r);
   const tcol = tcols[0], tOld = tcols.slice(1);
   const colP = t => t.split(/\n\n+/).map(p => `<p>${esc(p)}</p>`).join('');
   const gTag = g => `<span class="tag${/^A/.test(g) ? ' w' : /^[DF]/.test(g) ? ' l' : ''}">${esc(g)}</span>`;
   const WINL = { contender: 'contender', rebuilder: 'rebuilder', middle: 'middle', out: 'out of the race' };
   const gSide = (c, f, i, x) => { const yi = years.indexOf(c.y) >= 0 ? years.indexOf(c.y) : last; if (Array.isArray(x)) return `<span>${FS(f, yi)} ${gTag(x[i])}</span>`; return `<span style="display:grid;gap:2px"><span>${FS(f, yi)} <span class="owner">${esc(WINL[x.win[i]] || '')}</span></span><span class="owner">Goal ${gTag(x.g[i])} Value ${gTag(x.v[i])}</span></span>`; };
-  const gList = c => { const rows = tgRows().filter(r => r.y === c.y && r.w === c.w); return rows.length ? `<div style="margin-top:8px">${rows.map(r => tgTradeHTML(r, true)).join('')}</div>` : ''; };
+  const gList = c => { const rows = tgRows().filter(r => r.col === c); return rows.length ? `<div style="margin-top:8px">${rows.map(r => tgTradeHTML(r, true)).join('')}</div>` : ''; };
   const tradesHTML = tcol ? `<section class="card pad" id="wk-trades"><div class="eyebrow">${tcol.y} · week ${tcol.w} · trade grades</div><h3>Trade grades</h3><p class="sub">Two grades for each side. The goal grade judges the trade against the team's window: contenders on their title odds, rebuilders on value one to four seasons out with youth counting extra, everyone else on lineup points now and later. The value grade asks which side simply got more, using aging curves fitted to past seasons in these leagues and picks valued by what this league's past drafts produced at that slot. Tested on about 550 past trades, it picked the side that ended up with more points about 60% of the time, so it is a lean, not a verdict. Earlier trades get regraded on the points each side has actually gotten.</p>${gList(tcol)}<div class="column">${colP(tcol.text)}</div>${tOld.length ? `<details style="margin-top:10px"><summary>Earlier trade columns (${tOld.length})</summary>${tOld.map(r => `<div style="margin-top:12px"><div class="eyebrow">${r.y} · week ${r.w}</div>${gList(r)}<div class="column">${colP(r.text)}</div></div>`).join('')}</details>` : ''}</section>` : '';
   const nav = [['wk-recap', 'Recap'], ['wk-moves', 'Moves'], tcol ? ['wk-trades', 'Trade grades'] : null, ['wk-power', 'Power rankings'], K.luck && K.luck.rows.length ? ['wk-luck', 'Luck report'] : null, K.odds ? ['wk-odds', 'Playoff odds'] : null, K.preview.length ? ['wk-preview', `Week ${K.nextW} preview`] : null].filter(Boolean);
   const gameCard = g => { const aw = g.sa > g.sb, bw = g.sb > g.sa; const side = (f, s, win) => `<div style="display:flex;justify-content:space-between;gap:10px;align-items:baseline;${win ? 'font-weight:700' : 'color:var(--muted)'}"><span>${FL(f, last, false)}</span><span class="big" style="font-size:20px">${n1(s)}</span></div>`; return `<div class="card pad" style="display:grid;gap:6px;border-left:5px solid ${fcol(aw ? g.a : g.b)}">${side(g.a, g.sa, aw)}${side(g.b, g.sb, bw)}${g.reg ? '' : '<span class="tag" style="justify-self:start">Playoffs</span>'}</div>`; };
