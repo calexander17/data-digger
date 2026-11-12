@@ -8,3 +8,7 @@ How the trade grades' aging curves were fitted and tested, from League of Champi
 4. `below.js` fits breakout odds for players below replacement.
 
 Result on 556 trades from 2018 to 2023: the favored side got more points over replacement in the next three seasons about 60% of the time overall and about 65% on the most lopsided deals. Fitted curves beat the original guessed age curves (rank correlation 0.22 vs 0.16); boosting draft pick values made predictions worse.
+
+## Monthly refit
+
+`refit.js` runs the whole thing and patches a league's analytics.js: `cd` into this folder with each league's build files at ../run/<key>/build, then `node refit.js <path to analytics.js>`. It fits on every complete season, backtests honestly (each past trade graded only with seasons before it), refuses to update if the backtest's rank correlation drops by more than 0.03 from the last run in history.json, and appends the result to history.json.

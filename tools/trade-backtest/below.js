@@ -9,3 +9,5 @@ for (const L of Object.values(ds)) Object.keys(L.ps).map(Number).forEach(y => { 
 const T = {}; ['QB', 'RB', 'WR', 'TE', 'IDP'].forEach(p => { T[p] = [0, 1].map(bin => [0, 1, 2, 3].map(b => [1, 2, 3, 4, 5].map(h => { const e = S[`${p}|${b}|${bin}|${h}`]; return e && e[1] >= 8 ? +(e[0] / e[1]).toFixed(3) : 0; })));
   console.log(p, JSON.stringify(T[p]), [0,1].map(bin=>[0,1,2,3].map(b=>(S[`${p}|${b}|${bin}|1`]||[0,0])[1]).join('/')).join(' ')); });
 fs.writeFileSync('Tbelow.json', JSON.stringify(T));
+for (const p in T) for (const bin of [0, 1]) for (let b = 0; b < 4; b++) { const v = T[p][bin][b]; T[p][bin][b] = v.map((_, i) => { const w = v.slice(Math.max(0, i - 1), i + 2); return +(w.reduce((a, c) => a + c, 0) / w.length).toFixed(3); }); }
+fs.writeFileSync('Tbelow_s.json', JSON.stringify(T));

@@ -4,7 +4,9 @@ const fs = require('fs'); const ds = JSON.parse(fs.readFileSync('ds.json')); con
 const age = (p, y) => bio[p] ? (Date.UTC(y, 8, 1) / 1000 - bio[p][0]) / 31557600 : null;
 const grp = p => ['DL', 'LB', 'DB'].includes(p) ? 'IDP' : p;
 const B = a => a < 23 ? 0 : a < 25 ? 1 : a < 27 ? 2 : a < 29 ? 3 : a < 31 ? 4 : a < 33 ? 5 : 6;
-const LAST = 2025; const TB = JSON.parse(fs.readFileSync('Tbelow_s.json')); // last complete season
+// last complete season: the newest one with week-by-week data (finished seasons are cached week by week; the current one is not)
+const LAST = Math.max(...Object.values(ds).flatMap(L => Object.entries(L.ps).filter(([, m]) => Object.values(m).some(r => r[2])).map(([y]) => +y)));
+const TB = fs.existsSync('Tbelow_s.json') ? JSON.parse(fs.readFileSync('Tbelow_s.json')) : {}; // last complete season
 // ---- fit tables from seasons strictly before a cutoff year (to keep the test honest)
 function fitK(cut) {
   const S = {}; for (const L of Object.values(ds)) Object.keys(L.ps).map(Number).filter(y => y < cut).forEach(y => { const r = L.repl[y] || {}; Object.entries(L.ps[y]).forEach(([p, [pts, g]]) => { if (g < 6) return; const pos = L.pos[p]; const s = pts / g - (r[pos] || 0); if (!(s > 0)) return; const a = age(p, y); if (a == null) return;
@@ -26,7 +28,7 @@ function pickCurve(L, cut, pooled) {
   return o => { const w = Math.max(2, Math.round(o * 0.3)); const near = rows.filter(r => Math.abs(r.o - o) <= w); return [0, 1, 2, 3, 4].map(j => { const v = near.map(r => r.vals[j]).filter(x => x != null); if (v.length >= 3) return v.reduce((a, b) => a + b, 0) / v.length; const v1 = near.map(r => r.vals[1]).filter(x => x != null); return v1.length ? v1.reduce((a, b) => a + b, 0) / v1.length : 0; }); };
 }
 const trades = [];
-for (const [key, L] of Object.entries(ds)) L.trades.forEach(t => { if (t.y > 2023) return; trades.push({ key, L, t }); });
+for (const [key, L] of Object.entries(ds)) L.trades.forEach(t => { if (t.y > LAST - 2) return; trades.push({ key, L, t }); });
 function ppgAt(L, p, y, w) { // what we knew: this season before week w (if 4+ games) blended with last season
   const c = L.ps[y] && L.ps[y][p]; let pc = null, gc = 0; if (c && c[2]) { let s = 0; Object.entries(c[2]).forEach(([ww, v]) => { if (+ww < w && v !== 0) { s += v; gc++; } }); if (gc) pc = s / gc; }
   const q = L.ps[y - 1] && L.ps[y - 1][p]; const pp = q && q[1] >= 3 ? q[0] / q[1] : null;
@@ -84,6 +86,10 @@ const pick = process.argv[2]; const R2 = pick ? runs.filter(r => r.name.includes
 R2.forEach(M => console.log(M.name.padEnd(48), JSON.stringify(evalModel(M))));
 global.BLEND3 = true; console.log('--- with three-season blend'); R2.forEach(M => console.log(M.name.padEnd(48), JSON.stringify(evalModel(M))));
 if (process.argv[3] === 'cal') { global.BLEND3 = true; global.CAL = true; console.log('CALIBRATION, own-league picks, p1.25'); console.log(JSON.stringify(evalModel({ kind: 'fit', p: 1.25, d: 0.85, H: 4, pm: 1, pooled: false }))); }
-if (process.argv[3] === 'k') { const K = fitK(2027); const r = {}; Object.entries(K).forEach(([p, hs]) => r[p] = [1, 2, 3, 4, 5].map(h => hs[h].map(v => +v.toFixed(2)))); fs.writeFileSync('Kfinal.json', JSON.stringify(r)); console.log(JSON.stringify(r)); }
+if (process.argv[3] === 'k') { const K = fitK(LAST + 2); const r = {}; Object.entries(K).forEach(([p, hs]) => r[p] = [1, 2, 3, 4, 5].map(h => hs[h].map(v => +v.toFixed(2)))); fs.writeFileSync('Kfinal.json', JSON.stringify(r)); console.log(JSON.stringify(r)); }
 
 if (process.argv[3] === 'below') { global.BLEND3 = true; const M = { kind: 'fit', p: 1.25, d: 0.85, H: 4, pm: 1, pooled: false }; console.log('without', JSON.stringify(evalModel(M))); global.BELOW = true; console.log('with   ', JSON.stringify(evalModel(M))); }
+
+if (process.argv[3] === 'json') { global.BLEND3 = true; global.BELOW = true; const M = { kind: 'fit', p: 1.25, d: 0.85, H: 4, pm: 1, pooled: false };
+  const r = evalModel(M); global.BLEND3 = true; global.BELOW = false; const old = evalModel({ kind: 'old', p: 1.5, d: 0.85, H: 4, pm: 1, pooled: false });
+  console.log(JSON.stringify({ last: LAST, model: r, guessedCurves: old })); }

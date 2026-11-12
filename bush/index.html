@@ -1107,6 +1107,8 @@ const TG_K = {"QB":[[0.68,0.84,0.84,0.66,0.66,0.52,0.52],[0.6,0.69,0.69,0.66,0.5
 // breakout chance that makes young depth players worth something in a rebuild. Same seasons, smoothed.
 const TG_B = {"QB":[[[0.047,0.044,0.025,0.016,0.006],[0.005,0.006,0.011,0.016,0.021],[0.016,0.021,0.013,0.01,0.0],[0.018,0.019,0.016,0.013,0.01]],[[0.054,0.042,0.029,0.006,0.0],[0.042,0.052,0.034,0.043,0.028],[0.046,0.062,0.073,0.081,0.074],[0.024,0.021,0.013,0.011,0.008]]],"RB":[[[0.083,0.089,0.125,0.106,0.108],[0.026,0.026,0.038,0.028,0.029],[0.019,0.013,0.005,0.0,0.0],[0.004,0.004,0.003,0.002,0.002]],[[0.035,0.094,0.127,0.207,0.205],[0.115,0.095,0.063,0.037,0.03],[0.101,0.072,0.033,0.004,0.0],[0.024,0.017,0.009,0.002,0.001]]],"WR":[[[0.081,0.074,0.072,0.071,0.077],[0.017,0.018,0.017,0.011,0.006],[0.015,0.013,0.008,0.003,0.0],[0.005,0.003,0.0,0.0,0.0]],[[0.127,0.18,0.188,0.17,0.111],[0.12,0.099,0.084,0.044,0.036],[0.067,0.055,0.036,0.016,0.007],[0.007,0.005,0.003,0.0,0.0]]],"TE":[[[0.026,0.03,0.084,0.071,0.087],[0.005,0.014,0.017,0.02,0.014],[0.012,0.012,0.011,0.01,0.008],[0.01,0.01,0.007,0.006,0.004]],[[0.022,0.023,0.023,0.011,0.004],[0.097,0.087,0.066,0.023,0.001],[0.029,0.05,0.053,0.041,0.016],[0.03,0.022,0.011,0.002,0.0]]],"IDP":[[[0.035,0.024,0.016,0.01,0.013],[0.026,0.025,0.037,0.033,0.038],[0.032,0.029,0.017,0.01,0.004],[0.007,0.007,0.003,0.003,0.001]],[[0.079,0.084,0.081,0.058,0.041],[0.053,0.049,0.048,0.049,0.054],[0.035,0.035,0.037,0.027,0.022],[0.025,0.02,0.009,0.006,0.005]]]};
 const TG_VLET = [[20, 'A+'], [12, 'A'], [6.3, 'A-'], [2.5, 'B+'], [0.8, 'B'], [-0.8, 'C'], [-2.5, 'C-'], [-6.3, 'D+'], [-12, 'D'], [-20, 'D-'], [-Infinity, 'F']];
+// backtest accuracy, updated by each refit: overall, on the most lopsided deals, and on medium edges
+const TG_ACC = {"all":60,"top":65,"mid":58};
 const tgVal = m => TG_VLET.find(([t]) => m >= t)[1];
 const TG_LETTERS = [[2, 'A+'], [1.2, 'A'], [0.7, 'A-'], [0.4, 'B+'], [0.2, 'B'], [0.07, 'B-'], [-0.07, 'C'], [-0.2, 'C-'], [-0.4, 'D+'], [-0.7, 'D'], [-1.2, 'D-'], [-Infinity, 'F']];
 const tgLetter = u => TG_LETTERS.find(([t]) => u >= t)[1];
@@ -1217,7 +1219,7 @@ function tradeGrades(raw, L, A, K) {
       else { g = s.dNow * remW * (0.25 + (o0 ? o0.po : 0.5)) + fw * futL; s.basis = fw ? 'this season weighted by playoff odds, plus the next three' : 'this season, weighted by playoff odds'; }
       s.goalV = Math.round(g); s.goal = s.window === 'rebuilder' ? tgVal(g / K.sd) : tgLetter(g / (K.sd * 3));
       s.edge = r1(s.valueV / K.sd); s.valueV = Math.round(s.valueV); s.value = tgVal(s.edge);
-      s.conf = Math.abs(s.edge) >= 6.3 ? 65 : Math.abs(s.edge) >= 2.5 ? 58 : null;
+      s.conf = Math.abs(s.edge) >= 6.3 ? TG_ACC.top : Math.abs(s.edge) >= 2.5 ? TG_ACC.mid : null;
       s.grade = s.goal;
       s.dNow = r1(s.dNow); s.fut = s.fut.map(r1); delete s.gotRaw; delete s.gaveRaw;
     });
@@ -1236,7 +1238,7 @@ function tradeGrades(raw, L, A, K) {
     const ok = played >= 2;
     return { t, i: t.i, key: tgKey(t), played, pts: [t.p1, t.p2], hind: ok ? [tgLetter(u), tgLetter(-u)] : null, was: prev[tgKey(t)] || null, open: !!t.open };
   }).sort((a, b) => b.t.d - a.t.d);
-  return { W: K.W, y: cur, week, hind, remW, fw, repl: r1(repl), replPos: Object.fromEntries(Object.entries(replPos).filter(([, v]) => isFinite(v)).map(([k, v]) => [k, r1(v)])), letters: TG_LETTERS.map(x => x[1]) };
+  return { W: K.W, y: cur, acc: TG_ACC, week, hind, remW, fw, repl: r1(repl), replPos: Object.fromEntries(Object.entries(replPos).filter(([, v]) => isFinite(v)).map(([k, v]) => [k, r1(v)])), letters: TG_LETTERS.map(x => x[1]) };
 }
 function erf(x) { const t = 1 / (1 + 0.3275911 * Math.abs(x)); const y = 1 - (((((1.061405429 * t - 1.453152027) * t) + 1.421413741) * t - 0.284496736) * t + 0.254829592) * t * Math.exp(-x * x); return x >= 0 ? y : -y; }
 

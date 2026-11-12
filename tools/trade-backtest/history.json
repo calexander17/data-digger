@@ -1,0 +1,3 @@
+[
+ {"date": "2026-11-12", "last": 2025, "model": {"n": 556, "clear": 487, "acc": 59.5, "rho": 0.215, "top10": 68.3, "top25": 65.8, "top50": 61.1}, "guessedCurves": {"acc": 57.7, "rho": 0.162}, "updated": true, "note": "first fit"}
+]

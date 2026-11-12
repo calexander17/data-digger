@@ -1,4 +1,4 @@
-const fs = require('fs'); const lib = require('../run/loc/build/lib.js');
+const fs = require('fs'); const lib = require(require('path').resolve(__dirname, '../run/loc/build/lib.js'));
 const ds = JSON.parse(fs.readFileSync('ds.json'));
 const ids = new Set(); Object.values(ds).forEach(L => Object.values(L.ps).forEach(m => Object.keys(m).forEach(p => ids.add(p))));
 (async () => { const bio = {}; let need = [...ids];
