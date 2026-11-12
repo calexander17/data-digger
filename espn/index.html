@@ -826,7 +826,8 @@ function weekly(raw, L, A) {
   // playoff odds by simulation
   const rng = seed => () => { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let t2 = Math.imul(seed ^ seed >>> 15, 1 | seed); t2 = t2 + Math.imul(t2 ^ t2 >>> 7, 61 | t2) ^ t2; return ((t2 ^ t2 >>> 14) >>> 0) / 4294967296; };
   const gauss = R => { let u = 0, v = 0; while (!u) u = R(); while (!v) v = R(); return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v); };
-  const simulate = (throughW, nextW, N) => {
+  const simulate = (throughW, nextW, N, adj) => {
+    const mu = f => mean(f) + ((adj && adj[f]) || 0); // adj: points per week added to a team, for what-if odds
     const R = rng(1000 + throughW);
     const base = {}; for (let f = 1; f <= F; f++) base[f] = { w: 0, pf: 0 };
     reg.filter(g => g.w <= throughW).forEach(g => { if (!base[g.a] || !base[g.b]) return; base[g.a].pf += g.sa; base[g.b].pf += g.sb; if (g.sa > g.sb) base[g.a].w++; else if (g.sb > g.sa) base[g.b].w++; else { base[g.a].w += .5; base[g.b].w += .5; } });
@@ -835,14 +836,14 @@ function weekly(raw, L, A) {
     for (let it = 0; it < N; it++) {
       const st = {}; for (let f = 1; f <= F; f++) st[f] = { f, w: base[f].w, pf: base[f].pf };
       const nextRes = {};
-      rem.forEach(([w, a, b]) => { if (!st[a] || !st[b]) return; const xa = mean(a) + sd * gauss(R), xb = mean(b) + sd * gauss(R); st[a].pf += xa; st[b].pf += xb; if (xa > xb) st[a].w++; else st[b].w++; if (w === nextW) { nextRes[a] = xa > xb; nextRes[b] = xb > xa; } });
+      rem.forEach(([w, a, b]) => { if (!st[a] || !st[b]) return; const xa = mu(a) + sd * gauss(R), xb = mu(b) + sd * gauss(R); st[a].pf += xa; st[b].pf += xb; if (xa > xb) st[a].w++; else st[b].w++; if (w === nextW) { nextRes[a] = xa > xb; nextRes[b] = xb > xa; } });
       const order = Object.values(st).sort((a, b) => b.w - a.w || b.pf - a.pf);
       const seeds = order.slice(0, po.teams).map(x => x.f);
       seeds.forEach((f, i) => { out[f].po++; out[f].seed += i + 1; if (i < po.byes) out[f].bye++; });
       Object.keys(nextRes).forEach(f => { const k = nextRes[f] ? 'ifW' : 'ifL'; out[f][k][1]++; if (seeds.includes(+f)) out[f][k][0]++; });
       // bracket: byes sit out round one; every round pairs best remaining seed with worst
       let alive = seeds.slice(po.byes), waiting = seeds.slice(0, po.byes);
-      const play = (x, y) => (mean(x) + sd * gauss(R) > mean(y) + sd * gauss(R)) ? x : y;
+      const play = (x, y) => (mu(x) + sd * gauss(R) > mu(y) + sd * gauss(R)) ? x : y;
       const round = list => { const s2 = [...list].sort((a, b) => seeds.indexOf(a) - seeds.indexOf(b)); const won = []; while (s2.length > 1) won.push(play(s2.shift(), s2.pop())); return won.concat(s2); };
       if (alive.length) alive = round(alive);
       alive = alive.concat(waiting);
@@ -910,7 +911,8 @@ function weekly(raw, L, A) {
       career: Object.values(career).filter(c => c.seasons >= 2).sort((a, b) => b.luck - a.luck),
     };
   })();
-  return { W, lrw, po, recap, moves, power: pNow, odds, oddsPrev, preview, nextW, sd: r1(sd), lm: r1(lm), luck };
+  const sim = odds ? (adj => simulate(regDone, nextW, 4000, adj)) : null;
+  return { W, lrw, po, recap, moves, power: pNow, odds, oddsPrev, preview, nextW, sd: r1(sd), lm: r1(lm), luck, sim };
 }
 
 // ---- future cast: age curves, pick capital and projected team strength for the next few seasons
@@ -1089,9 +1091,122 @@ function previewNote(n, nm, pc, lgName) {
   }
   return '';
 }
+// ---- trade grades: an instant grade for each side the week a trade happens, and a hindsight grade as the points come in.
+// Instant grade = rest-of-season lineup value (weighted by how much the team is in the race) plus future value
+// (age curves for players, this league's own draft history for picks). Hindsight grade = points over replacement
+// each side has actually gotten since the trade, the same measure the Trades tab uses.
+const TG_LETTERS = [[2, 'A+'], [1.2, 'A'], [0.7, 'A-'], [0.4, 'B+'], [0.2, 'B'], [0.07, 'B-'], [-0.07, 'C'], [-0.2, 'C-'], [-0.4, 'D+'], [-0.7, 'D'], [-1.2, 'D-'], [-Infinity, 'F']];
+const tgLetter = u => TG_LETTERS.find(([t]) => u >= t)[1];
+const tgKey = t => `${t.d}|${t.f1}|${t.f2}|${[...t.g1].sort().join(',')}|${[...t.g2].sort().join(',')}`;
+function tradeGrades(raw, L, A, K) {
+  if (!K) return null;
+  const years = A.years, last = A.last, cur = years[last], F = activeF(raw, years, last);
+  const r1 = x => Math.round(x * 10) / 10;
+  const lrw = K.lrw, regDone = Math.min(K.W, lrw);
+  const fw = raw.redraft ? 0 : raw.keeper ? 0.35 : 1; // how much next seasons matter: none in a redraft, some in a keeper league
+  const pos = pid => ((raw.pl[pid] || [])[1] || '').toUpperCase();
+  const bio = raw.bio || {};
+  const ageAt = (pid, y) => { const b = (bio[pid] || [])[0]; return b ? (Date.UTC(y, 8, 1) / 1000 - b) / 31557600 : null; };
+  const ro = {}; for (let f = 1; f <= F; f++) ro[f] = (raw.ro[cur] && raw.ro[cur][f - 1] || '').split(',').filter(Boolean);
+  // lineup shape from last week's starters
+  const lw = (raw.lw && raw.lw.rows || '').split('\n').filter(Boolean).map(l => l.split('|'));
+  const stCount = {}, stPos = {}; lw.filter(a => a[3] === '1').forEach(a => { stCount[a[0]] = (stCount[a[0]] || 0) + 1; const k = a[0] + '|' + pos(a[1]); stPos[k] = (stPos[k] || 0) + 1; });
+  const S = Math.round(Object.values(stCount).reduce((a, b) => a + b, 0) / Math.max(1, Object.keys(stCount).length)) || 10;
+  const mainPos = ['QB', 'RB', 'WR', 'TE'];
+  const need = {}; mainPos.forEach(p => { const c = Object.keys(stCount).map(f => stPos[f + '|' + p] || 0); need[p] = c.length ? Math.min(...c) : 0; });
+  const cap = {}; Object.entries(stPos).forEach(([k, n]) => { const p = k.split('|')[1]; cap[p] = Math.max(cap[p] || 0, n); });
+  // scoring rate now: this season blended with last
+  const psC = (raw.ps || {})[cur] || {}, psP = (raw.ps || {})[cur - 1] || {};
+  const R = A.draftReport; const exp = R ? R.expRate : [];
+  const rookieSlot = {}; if (R) R.picks.filter(p => p.y === cur).forEach(p => rookieSlot[p.pid] = p.overall);
+  const ppgNow = pid => {
+    const c = psC[pid], p = psP[pid];
+    const pc = c && c[1] ? c[0] / c[1] : null, pp = p && p[1] >= 3 ? p[0] / p[1] : null;
+    if (pc != null && pp != null) { const w = c[1] / (c[1] + 4); return w * pc + (1 - w) * pp; }
+    if (pc != null) return c[1] >= 3 ? pc : pc * 0.7 + (rookieSlot[pid] ? (exp[rookieSlot[pid]] || 0) / lrw * 0.3 : 0);
+    if (pp != null) return pp * 0.85;
+    if (rookieSlot[pid]) return (exp[rookieSlot[pid]] || 0) / lrw;
+    return 0;
+  };
+  const step = (p, a) => {
+    if (a == null) return 1;
+    if (p === 'QB') return a < 25 ? 1.08 : a < 31 ? 1.02 : a < 35 ? 1 : a < 38 ? 0.9 : 0.75;
+    if (p === 'RB') return a < 23 ? 1.1 : a < 26 ? 1.02 : a < 27 ? 0.95 : a < 28 ? 0.88 : a < 29 ? 0.82 : 0.72;
+    if (p === 'WR') return a < 24 ? 1.1 : a < 28 ? 1.03 : a < 30 ? 0.97 : a < 31 ? 0.9 : 0.8;
+    if (p === 'TE') return a < 25 ? 1.12 : a < 29 ? 1.03 : a < 31 ? 0.95 : 0.85;
+    return a < 25 ? 1.04 : a < 30 ? 1 : 0.9;
+  };
+  const projC = {}; const proj = (pid, y) => { const k = pid + '|' + y; if (projC[k] != null) return projC[k]; let v = ppgNow(pid); const p = pos(pid); const yr1 = (bio[pid] || [])[1] === cur; for (let k2 = cur; k2 < y; k2++) { v *= step(p, ageAt(pid, k2)); if (yr1 && k2 === cur) v *= 1.08; } return projC[k] = v; };
+  // replacement level: a deep bench player, the one ranked about 1.5 starting lineups' worth down the league's rostered players
+  const repl = (() => { const v = []; for (let f = 1; f <= F; f++) v.push(...ro[f].map(ppgNow)); v.sort((a, b) => b - a); return v.length ? (v[Math.min(v.length - 1, Math.round(F * S * 1.5))] || 0) : 5; })();
+  // best lineup a roster can field in season y, weekly points (empty or weak slots get a waiver-wire replacement)
+  const lineup = (pids, y) => {
+    const pool = pids.map(pid => ({ pid, pos: pos(pid), v: proj(pid, y) }));
+    const used = new Set(); const out = []; const n = {};
+    const take = x => { used.add(x); out.push(x); n[x.pos] = (n[x.pos] || 0) + 1; };
+    mainPos.forEach(p => { pool.filter(x => x.pos === p).sort((a, b) => b.v - a.v).slice(0, need[p]).forEach(take); });
+    pool.filter(x => !used.has(x)).sort((a, b) => b.v - a.v).forEach(x => { if (out.length >= S) return; if ((n[x.pos] || 0) >= (cap[x.pos] || 0)) return; take(x); });
+    return out.reduce((t, x) => t + Math.max(x.v, repl), 0) + Math.max(0, S - out.length) * repl;
+  };
+  // picks, valued by what picks near that slot have produced in this league's past drafts
+  const lastDraft = R && R.picks.length ? Math.max(...R.picks.map(p => p.y)) : cur;
+  const hist = R ? R.picks.filter(p => p.el >= 1) : [];
+  const ramp = n => n <= 0 ? 0.75 : n === 1 ? 1.05 : 1.15;
+  const poolAt = {}; const poolFor = o => { const k = Math.round(o); if (poolAt[k]) return poolAt[k]; const w = Math.max(2, Math.round(k * 0.3)); return poolAt[k] = hist.filter(p => Math.abs(p.overall - k) <= w).map(p => (p.raw != null ? p.raw : p.tot) / Math.max(p.starts, p.el * lrw * 0.5, 1)); };
+  const order = (() => { const pw = K.power || []; const od = K.odds || {}; return [...Array(F)].map((_, i) => i + 1).sort((a, b) => ((od[a] ? od[a].po : 0) - (od[b] ? od[b].po : 0)) || ((pw.find(x => x.f === b) || {}).rank || 0) - ((pw.find(x => x.f === a) || {}).rank || 0)); })();
+  const pickInfo = a => { const m = String(a).match(/^FP_(\d+)_(\d+)_(\d+)$/); if (!m) return null; const orig = +m[1], y = +m[2], rd = +m[3]; const slot = y === lastDraft + 1 ? order.indexOf(orig) + 1 : (F + 1) / 2; return { orig, y, rd, slot, overall: (rd - 1) * F + slot }; };
+  const pickV = (k, yr) => { // expected weekly points over a waiver-wire player in season yr
+    if (!k || k.y <= lastDraft || k.y > yr) return 0;
+    const pool = poolFor(k.overall); const rp = ramp(yr - k.y);
+    if (!pool.length) return Math.max(0, (exp[Math.round(k.overall)] || 0) / lrw * rp - repl);
+    return pool.reduce((t, v) => t + Math.max(0, v * rp - repl), 0) / pool.length;
+  };
+  const isP = a => /^\d+$/.test(a);
+  const sim = K.sim || null; const base = sim ? sim({}) : null;
+  const remW = Math.max(0, lrw - regDone) + Math.ceil(Math.log2(Math.max(2, (K.po || {}).teams || 6)));
+  const FY = [1, 2, 3];
+  const side = (f, got, gave) => {
+    const after = [...new Set(ro[f].filter(p => !gave.includes(p)).concat(got.filter(isP)))];
+    const before = [...new Set(after.filter(p => !got.includes(p)).concat(gave.filter(isP)))];
+    const dNow = lineup(after, cur) - lineup(before, cur);
+    const fut = FY.map(k => { const y = cur + k; return (lineup(after, y) - lineup(before, y)) + got.map(pickInfo).reduce((t, x) => t + pickV(x, y), 0) - gave.map(pickInfo).reduce((t, x) => t + pickV(x, y), 0); });
+    const assets = list => list.map(a => { const k = pickInfo(a); if (k) return { a, pick: k, v: r1(FY.reduce((t, j) => t + pickV(k, cur + j), 0) / FY.length) }; if (isP(a)) return { a, pid: a, pos: pos(a), ppg: r1(ppgNow(a)), age: ageAt(a, cur) != null ? Math.floor(ageAt(a, cur)) : null, next: r1(proj(a, cur + 1)) }; return { a, other: true }; });
+    return { f, got: assets(got), gave: assets(gave), dNow, fut };
+  };
+  const grade = t => {
+    const s1 = side(t.f1, t.g2, t.g1), s2 = side(t.f2, t.g1, t.g2);
+    const post = sim ? sim({ [t.f1]: s1.dNow * 0.85, [t.f2]: s2.dNow * 0.85 }) : null;
+    [s1, s2].forEach(s => {
+      const o0 = base && base[s.f], o1 = post && post[s.f];
+      const ctx = 0.25 + (o0 ? o0.po : regDone >= lrw ? 0 : 0.5); // this season's points count for little to a team out of the race
+      s.nowV = s.dNow * remW * ctx;
+      s.futV = fw * s.fut.reduce((t, x, i) => t + x * lrw * Math.pow(0.8, i + 1), 0);
+      s.V = s.nowV + s.futV;
+      s.u = s.V / (K.sd * 3);
+      s.grade = tgLetter(s.u);
+      s.odds = o0 && o1 ? { po: [o0.po, o1.po], title: [o0.title, o1.title] } : null;
+      s.dNow = r1(s.dNow); s.nowV = Math.round(s.nowV); s.futV = Math.round(s.futV); s.V = Math.round(s.V); s.fut = s.fut.map(r1);
+    });
+    return [s1, s2];
+  };
+  // earlier instant grades, saved with each trades column
+  const prev = {}; (raw.recaps || []).filter(r => r.kind === 'trades' && r.key === (raw.crossKey || r.key) && r.grades).forEach(r => Object.entries(r.grades).forEach(([k, v]) => prev[k] = { g: v, y: r.y, w: r.w }));
+  const k1 = raw.k1[cur];
+  const weekAfter = d => Math.max(1, Math.ceil((d - k1) / 7) + 1); // first week played after the trade
+  const mine = A.trades.filter(t => t.yi === last);
+  const fresh = K.moves.trades.map(i => A.trades[i]).filter(t => !prev[tgKey(t)]);
+  const week = fresh.map(t => ({ t, i: t.i, key: tgKey(t), sides: grade(t) }));
+  const hind = mine.filter(t => !week.some(x => x.i === t.i)).map(t => {
+    const played = Math.max(0, K.W - weekAfter(t.d) + 1);
+    const d1 = t.p1 - t.p2; const u = d1 / (K.sd * 1.5);
+    const ok = played >= 2;
+    return { t, i: t.i, key: tgKey(t), played, pts: [t.p1, t.p2], hind: ok ? [tgLetter(u), tgLetter(-u)] : null, was: prev[tgKey(t)] || null, open: !!t.open };
+  }).sort((a, b) => b.t.d - a.t.d);
+  return { W: K.W, y: cur, week, hind, remW, fw, repl: r1(repl), letters: TG_LETTERS.map(x => x[1]) };
+}
 function erf(x) { const t = 1 / (1 + 0.3275911 * Math.abs(x)); const y = 1 - (((((1.061405429 * t - 1.453152027) * t) + 1.421413741) * t - 0.284496736) * t + 0.254829592) * t * Math.exp(-x * x); return x >= 0 ? y : -y; }
 
-if (typeof module !== 'undefined') module.exports = { analyze, weekly, future, preview, previewNote };
+if (typeof module !== 'undefined') module.exports = { analyze, weekly, future, preview, previewNote, tradeGrades, tgKey };
 
 </script>
 <script>
@@ -1979,9 +2094,16 @@ function viewWeek() {
   const K = wkData();
   if (!K) { main.innerHTML = '<section><h2 class="sec">This week</h2><p class="lede">No games have been played this season yet.</p></section>'; return; }
   const y = years[last]; const R = K.recap;
-  const recaps = (raw.recaps || []).filter(r => r.kind !== 'preview' && r.key === (raw.crossKey || r.key)).sort((a, b) => b.y - a.y || b.w - a.w);
+  const recaps = (raw.recaps || []).filter(r => (!r.kind || r.kind === 'recap') && r.key === (raw.crossKey || r.key)).sort((a, b) => b.y - a.y || b.w - a.w);
   const latest = recaps.find(r => r.y === y && r.w === K.W);
-  const nav = [['wk-recap', 'Recap'], ['wk-moves', 'Moves'], ['wk-power', 'Power rankings'], K.luck && K.luck.rows.length ? ['wk-luck', 'Luck report'] : null, K.odds ? ['wk-odds', 'Playoff odds'] : null, K.preview.length ? ['wk-preview', `Week ${K.nextW} preview`] : null].filter(Boolean);
+  // trade grades column: instant grades for the week's trades, saved with the column, plus hindsight grades in the text
+  const tcols = (raw.recaps || []).filter(r => r.kind === 'trades' && r.key === (raw.crossKey || r.key)).sort((a, b) => b.y - a.y || b.w - a.w);
+  const tcol = tcols[0], tOld = tcols.slice(1);
+  const colP = t => t.split(/\n\n+/).map(p => `<p>${esc(p)}</p>`).join('');
+  const gTag = g => `<span class="tag${/^A/.test(g) ? ' w' : /^[DF]/.test(g) ? ' l' : ''}">${esc(g)}</span>`;
+  const gList = c => c && c.grades && Object.keys(c.grades).length ? `<ul class="list" style="margin-top:8px">${Object.entries(c.grades).map(([k, g]) => { const [, f1, f2] = k.split('|').map(Number); return `<li><span>${FS(f1, years.indexOf(c.y) >= 0 ? years.indexOf(c.y) : last)} ${gTag(g[0])}</span><span>${FS(f2, years.indexOf(c.y) >= 0 ? years.indexOf(c.y) : last)} ${gTag(g[1])}</span></li>`; }).join('')}</ul>` : '';
+  const tradesHTML = tcol ? `<section class="card pad" id="wk-trades"><div class="eyebrow">${tcol.y} · week ${tcol.w} · trade grades</div><h3>Trade grades</h3><p class="sub">Instant grades for each side the week a trade goes through: how much it changes the best lineup this season (weighted by the team's playoff odds) and over the next three seasons, with picks valued by what this league's past drafts produced at that slot. Earlier trades get regraded on the points each side has actually gotten.</p>${gList(tcol)}<div class="column">${colP(tcol.text)}</div>${tOld.length ? `<details style="margin-top:10px"><summary>Earlier trade columns (${tOld.length})</summary>${tOld.map(r => `<div style="margin-top:12px"><div class="eyebrow">${r.y} · week ${r.w}</div>${gList(r)}<div class="column">${colP(r.text)}</div></div>`).join('')}</details>` : ''}</section>` : '';
+  const nav = [['wk-recap', 'Recap'], ['wk-moves', 'Moves'], tcol ? ['wk-trades', 'Trade grades'] : null, ['wk-power', 'Power rankings'], K.luck && K.luck.rows.length ? ['wk-luck', 'Luck report'] : null, K.odds ? ['wk-odds', 'Playoff odds'] : null, K.preview.length ? ['wk-preview', `Week ${K.nextW} preview`] : null].filter(Boolean);
   const gameCard = g => { const aw = g.sa > g.sb, bw = g.sb > g.sa; const side = (f, s, win) => `<div style="display:flex;justify-content:space-between;gap:10px;align-items:baseline;${win ? 'font-weight:700' : 'color:var(--muted)'}"><span>${FL(f, last, false)}</span><span class="big" style="font-size:20px">${n1(s)}</span></div>`; return `<div class="card pad" style="display:grid;gap:6px;border-left:5px solid ${fcol(aw ? g.a : g.b)}">${side(g.a, g.sa, aw)}${side(g.b, g.sb, bw)}${g.reg ? '' : '<span class="tag" style="justify-self:start">Playoffs</span>'}</div>`; };
   const sup = (eb, html) => html ? `<div class="fact"><div class="eyebrow">${eb}</div><div>${html}</div></div>` : '';
   const vs = x => x ? `${FS(x.f)} <b>${n1(x.s)}</b> to ${FS(x.opp)} ${n1(x.os)}` : '';
@@ -2055,6 +2177,7 @@ function viewWeek() {
   <div class="grid3">${R.games.map(gameCard).join('')}</div>
   <div class="facts">${supers}</div>
   <section id="wk-moves"><h2 class="sec" style="font-size:24px">Moves of the week</h2><p class="lede">Everything since last Tuesday: ${M.trades.length} ${M.trades.length === 1 ? 'trade' : 'trades'}, ${M.claims.length} waiver ${M.claims.length === 1 ? 'claim' : 'claims'}, ${M.adds.length} free agent ${M.adds.length === 1 ? 'add' : 'adds'}.</p></section>
+  ${tradesHTML}
   ${M.trades.length ? `<section class="card">${M.trades.map(i => tradeCard(A.trades[i])).join('')}</section>` : ''}
   <div class="grid3"><section class="card pad"><h3>Waiver claims</h3><p class="sub">Winning bids, biggest first.</p><ol class="list">${claimRows || '<li class="owner">None this week.</li>'}</ol></section>
     <section class="card pad"><h3>Free agent adds</h3><ol class="list">${addRows || '<li class="owner">None this week.</li>'}</ol></section>
